@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>POWERGuard 5 — Sistema Automático de Compensación de Factor de Potencia</title>
+  <title>POWERGuard 5 — SCADA Industrial de Compensación de Factor de Potencia</title>
   
   <!-- Fonts: Inter & JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   
-  <!-- Tailwind CSS CDN with custom dark palette -->
+  <!-- Tailwind CSS CDN configured with SCADA Industrial Palette -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -18,21 +18,21 @@
       theme: {
         extend: {
           colors: {
-            brand: {
-              50: '#f0f9ff',
-              100: '#e0f2fe',
-              400: '#38bdf8',
-              500: '#0ea5e9',
-              600: '#0284c7',
-              700: '#0369a1',
-              900: '#0c4a6e',
+            scada: {
+              950: '#09090b', // Fondo primario
+              900: '#0f0f12', // Fondo secundario
+              850: '#121215', // Tarjetas SCADA
+              800: '#18181c', // Tarjetas hover
+              700: '#27272a', // Bordes sutiles
+              600: '#3f3f46', // Bordes activos
             },
-            industrial: {
-              950: '#050913',
-              900: '#0a101d',
-              850: '#0e172a',
-              800: '#152138',
-              700: '#1f2f4c',
+            status: {
+              green: '#22c55e',
+              amber: '#fbbf24',
+              red: '#ef4444',
+              cyan: '#22d3ee',
+              blue: '#3b82f6',
+              purple: '#c084fc',
             }
           },
           fontFamily: {
@@ -44,811 +44,694 @@
     }
   </script>
   
-  <!-- Custom CSS for realistic LEDs, CRT styling & gauges -->
+  <!-- Custom SCADA Styles -->
   <link rel="stylesheet" href="styles.css">
 </head>
-<body class="bg-industrial-950 text-slate-100 min-h-screen antialiased flex flex-col selection:bg-brand-500 selection:text-white">
+<body class="bg-scada-950 text-slate-100 min-h-screen antialiased flex flex-col selection:bg-cyan-500 selection:text-black">
 
   <!-- ========================================================================
-       TOP HEADER & SYSTEM NAVIGATION BAR
+       COMPACT SCADA HEADER (H = 64px)
        ======================================================================== -->
-  <header class="border-b border-slate-800/80 bg-industrial-900/90 sticky top-0 z-50 backdrop-blur-md shadow-lg">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+  <header class="border-b border-scada-700 bg-scada-900/95 sticky top-0 z-40 backdrop-blur-md h-16 flex items-center px-4 sm:px-6 justify-between">
+    
+    <!-- Left: Identity & Branding -->
+    <div class="flex items-center space-x-3">
+      <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-cyan-500 to-blue-600 p-0.5 flex items-center justify-center shadow-md shadow-cyan-500/20">
+        <div class="w-full h-full bg-scada-950 rounded-[7px] flex items-center justify-center">
+          <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        </div>
+      </div>
+      <div>
+        <div class="flex items-center space-x-2">
+          <span class="text-base font-bold tracking-tight text-white flex items-center gap-1.5 font-sans">
+            POWER<span class="text-cyan-400">Guard</span>
+            <span class="text-xs bg-cyan-950/70 text-cyan-400 border border-cyan-500/30 px-1.5 py-0.2 rounded font-mono font-medium">5.2 SCADA</span>
+          </span>
+        </div>
+        <p class="text-[11px] text-slate-400 leading-none mt-0.5 hidden sm:block">
+          Instituto Kriete · Circuitos Eléctricos
+        </p>
+      </div>
+    </div>
+
+    <!-- Center: 3 Navigation Tabs (SCADA Switcher) -->
+    <nav class="flex items-center bg-scada-950 border border-scada-700 p-1 rounded-lg space-x-1" role="tablist">
+      <button id="tabBtnMonitor" class="px-3 py-1.5 rounded-md text-xs font-medium transition text-white bg-scada-800 border border-scada-600 shadow-sm flex items-center gap-1.5" data-tab="tabMonitor">
+        <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+        </svg>
+        <span>Monitor en Vivo</span>
+      </button>
+
+      <button id="tabBtnEngineering" class="px-3 py-1.5 rounded-md text-xs font-medium text-slate-400 hover:text-white transition flex items-center gap-1.5" data-tab="tabEngineering">
+        <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+        </svg>
+        <span>Ingeniería y Cálculos</span>
+      </button>
+
+      <button id="tabBtnHistory" class="px-3 py-1.5 rounded-md text-xs font-medium text-slate-400 hover:text-white transition flex items-center gap-1.5" data-tab="tabHistory">
+        <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+        </svg>
+        <span>Historial y Diagnóstico</span>
+      </button>
+    </nav>
+
+    <!-- Right: Operational Controls & Hardware Link -->
+    <div class="flex items-center space-x-2.5">
       
-      <!-- Logo and Titles -->
-      <div class="flex items-center space-x-3 sm:space-x-4">
-        <div class="w-12 h-12 rounded-xl bg-gradient-to-tr from-sky-500 via-indigo-500 to-emerald-400 p-0.5 flex items-center justify-center shadow-lg shadow-sky-500/20">
-          <div class="w-full h-full bg-industrial-900 rounded-[10px] flex items-center justify-center">
-            <svg class="w-6 h-6 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          </div>
-        </div>
-        <div>
-          <div class="flex items-center space-x-2">
-            <h1 class="text-lg sm:text-xl font-bold tracking-tight text-white flex items-center gap-2">
-              POWER<span class="text-sky-400">Guard</span> <span class="bg-sky-500/10 text-sky-400 border border-sky-500/30 text-xs px-2 py-0.5 rounded-full font-mono font-medium">v5.0</span>
-            </h1>
-            <span class="hidden md:inline-block text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded border border-slate-700">60 Hz / 120 VAC</span>
-          </div>
-          <p class="text-xs text-slate-400 flex items-center gap-1.5 mt-0.5">
-            <span>Instituto Kriete de Ingeniería y Ciencias</span>
-            <span class="text-slate-600">•</span>
-            <span class="text-slate-300 font-medium">Circuitos Eléctricos</span>
-          </p>
-        </div>
+      <!-- Source Status: Sim / USB Serial -->
+      <div id="modeBadge" class="hidden md:flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span id="modeText">SIMULACIÓN</span>
       </div>
 
-      <!-- Center Status / Team Badge -->
-      <div class="hidden xl:flex items-center bg-slate-900/80 border border-slate-800 px-3 py-1.5 rounded-lg text-xs space-x-2">
-        <span class="text-slate-400">Equipo 5:</span>
-        <span class="text-slate-200 font-medium">Diana C. • Emma P. • Eduardo F. • Juan Pablo R.</span>
-      </div>
+      <!-- Control Mode: Auto / Manual -->
+      <button id="toggleAutoBtn" class="flex items-center space-x-1.5 bg-scada-850 hover:bg-scada-800 border border-scada-700 text-slate-200 px-2.5 py-1 rounded-md text-xs font-medium transition" title="Alternar entre Control Automático y Control Manual">
+        <span id="autoIndicatorDot" class="w-2 h-2 rounded-full bg-cyan-400"></span>
+        <span id="autoBtnText" class="font-mono text-[11px]">AUTO</span>
+      </button>
 
-      <!-- System Controls & Connection -->
-      <div class="flex items-center space-x-3">
-        
-        <!-- Mode indicator badge -->
-        <div id="modeBadge" class="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span id="modeText">SIMULACIÓN ACTIVA</span>
-        </div>
+      <!-- Alarms Drawer Toggle Button with Counter -->
+      <button id="btnOpenAlarms" class="relative p-1.5 rounded-md bg-scada-850 hover:bg-scada-800 text-slate-300 border border-scada-700 transition flex items-center gap-1.5" title="Panel Central de Alarmas del Sistema">
+        <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+        </svg>
+        <span id="alarmCountHeaderBadge" class="text-[10px] font-mono font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40 px-1.5 py-0.2 rounded-full">0</span>
+      </button>
 
-        <!-- Auto/Manual Switch -->
-        <button id="toggleAutoBtn" class="flex items-center space-x-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-medium transition shadow-sm">
-          <span id="autoIndicatorDot" class="w-2 h-2 rounded-full bg-sky-400"></span>
-          <span id="autoBtnText">Control Automático (0.95 - 0.99)</span>
-        </button>
+      <!-- Presentation Mode Toggle (Zen / Fullscreen for defense) -->
+      <button id="btnTogglePresentation" class="p-1.5 rounded-md bg-scada-850 hover:bg-scada-800 text-slate-300 border border-scada-700 transition hidden sm:flex items-center" title="Modo Presentación (Pantalla Completa HMI)">
+        <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+        </svg>
+      </button>
 
-        <!-- Web Serial Connect Button -->
-        <button id="btnConnectSerial" class="flex items-center space-x-2 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-md shadow-sky-600/25 transition active:scale-95">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-          </svg>
-          <span id="serialBtnLabel">Conectar Arduino Nano (USB)</span>
-        </button>
+      <!-- Web Serial Connect Button (Arduino Nano USB) -->
+      <button id="btnConnectSerial" class="flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded-md text-xs font-semibold shadow-sm transition active:scale-95">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+        </svg>
+        <span id="serialBtnLabel">Conectar USB</span>
+      </button>
 
-        <!-- Technical Specs Modal Button -->
-        <button id="btnOpenDocs" class="p-2 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700/80 transition" title="Ficha Técnica y Memoria de Cálculo">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        </button>
+      <!-- Docs Modal Button -->
+      <button id="btnOpenDocs" class="p-1.5 rounded-md bg-scada-850 hover:bg-scada-800 text-slate-400 hover:text-white border border-scada-700 transition" title="Ficha Técnica y Esquema de Hardware">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      </button>
 
-      </div>
     </div>
   </header>
 
   <!-- ========================================================================
-       LOAD PRESETS & HARDWARE COMMAND BAR
+       TAB 1: MONITOR EN VIVO (BENTO GRID SCADA DASHBOARD)
        ======================================================================== -->
-  <section class="bg-industrial-900 border-b border-slate-800/60 py-2.5 px-4 sm:px-6 lg:px-8">
-    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
+  <main id="tabMonitor" class="tab-content active max-w-7xl mx-auto px-4 sm:px-6 py-4 space-y-4 flex-1 w-full">
+
+    <!-- Row 1: Motor Preset Bar & Hardware Actions (Compact Line) -->
+    <section class="hide-in-presentation scada-card scada-card-compact flex flex-wrap items-center justify-between gap-2.5 text-xs">
       
-      <!-- Motor WEG W01 Info & Presets -->
+      <!-- Motor Load Selection -->
       <div class="flex flex-wrap items-center gap-2">
         <span class="text-slate-400 font-medium flex items-center gap-1.5">
-          <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
           </svg>
-          Motor WEG W01 (0.5 HP · 115V · 60Hz):
+          Carga Motor WEG:
         </span>
         
-        <div class="inline-flex rounded-lg border border-slate-700 bg-slate-950 p-0.5" role="group">
-          <button id="btnLoadEmpty" class="px-2.5 py-1 rounded-md text-emerald-300 bg-emerald-950/60 border border-emerald-500/40 font-medium hover:text-white transition active flex items-center gap-1" title="Condición real de prueba en el laboratorio: Motor en vacío permanente">
-            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            En Vacío (Lab Real: FP ≈ 0.20 · 130W)
+        <div class="inline-flex rounded-md border border-scada-700 bg-scada-950 p-0.5" role="group">
+          <button id="btnLoadEmpty" class="px-2.5 py-1 rounded text-[11px] font-mono text-emerald-300 bg-emerald-950/60 border border-emerald-500/40 font-medium transition active" title="Condición real en vacío: P=130W, Q=600 VAR, FP sin comp = 0.212">
+            En Vacío (130 W / 600 VAR)
           </button>
-          <button id="btnLoadMid" class="px-2.5 py-1 rounded-md text-slate-400 hover:text-white transition">
-            Carga Media (350W / 650 VAR)
+          <button id="btnLoadMid" class="px-2.5 py-1 rounded text-[11px] font-mono text-slate-400 hover:text-white transition" title="Carga media: P=350W, Q=650 VAR, FP sin comp = 0.474">
+            Carga Media (350 W / 650 VAR)
           </button>
-          <button id="btnLoadFull" class="px-2.5 py-1 rounded-md text-slate-400 hover:text-white transition">
-            Plena Carga (588W / 744 VAR)
+          <button id="btnLoadFull" class="px-2.5 py-1 rounded text-[11px] font-mono text-slate-400 hover:text-white transition" title="Plena carga: P=588W, Q=744 VAR, FP sin comp = 0.620">
+            Plena Carga (588 W / 744 VAR)
           </button>
-          <button id="btnLoadOff" class="px-2.5 py-1 rounded-md text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 transition">
-            Apagar Motor (0W)
+          <button id="btnLoadOff" class="px-2.5 py-1 rounded text-[11px] font-mono text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 transition" title="Motor en reposo / Desconexión segura de capacitores">
+            Motor Apagado (0 W)
           </button>
         </div>
+      </div>
 
-        <!-- Inrush / Current Peak Simulator Button (10-15 A) -->
-        <button id="btnSimInrush" class="px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-600/30 to-amber-500/20 hover:from-amber-600/50 hover:to-amber-500/40 text-amber-300 border border-amber-500/40 text-xs font-medium transition flex items-center gap-1.5 shadow-sm active:scale-95" title="Simula el transitorio real de corriente de arranque con pico entre 10 y 15 A medido por el ACS712-30A">
-          <svg class="w-3.5 h-3.5 text-amber-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <!-- Action Buttons -->
+      <div class="flex items-center gap-2">
+        <button id="btnSimInrush" class="px-2.5 py-1 rounded bg-amber-950/40 hover:bg-amber-900/50 text-amber-300 border border-amber-500/40 transition flex items-center gap-1 font-mono text-[11px]" title="Simula transitorio real de arranque con pico entre 10 y 15 A medido por ACS712-30A">
+          <svg class="w-3 h-3 text-amber-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
-          <span>Pico de Arranque (10-15A)</span>
+          <span>Pico Arranque [I]</span>
+        </button>
+        <button id="btnSendTest" class="px-2.5 py-1 rounded bg-scada-850 hover:bg-scada-800 text-slate-300 border border-scada-700 transition font-mono text-[11px]" title="Test secuencial de los 3 LEDs y optotriacs D4, D5, D6">
+          <span>Test LEDs [T]</span>
+        </button>
+        <button id="btnSendCalib" class="px-2.5 py-1 rounded bg-scada-850 hover:bg-scada-800 text-slate-300 border border-scada-700 transition font-mono text-[11px]" title="Calibrar referencias de tierra virtual VB (2.5 V) en A0 y A1">
+          <span>Calibrar VB [C]</span>
+        </button>
+        <button id="btnSendOff" class="px-2.5 py-1 rounded bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 border border-rose-800/60 transition font-mono text-[11px]" title="Desconectar todos los pasos del banco inmediatamente">
+          <span>Apagar Todo [0]</span>
         </button>
       </div>
 
-      <!-- Quick Serial Actions -->
-      <div class="flex items-center gap-2">
-        <button id="btnSendTest" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition flex items-center gap-1 font-mono text-[11px]" title="Comando serie 't': prueba secuencial de LEDs">
-          <span>Test LEDs [t]</span>
+    </section>
+
+    <!-- ====================================================================
+         BENTO GRID INDUSTRIAL SCADA (2-COLUMN ARCHITECTURE)
+         Left: FP Protagonist + Capacitor Bank 1:2:4
+         Right: Motor WEG Visual + 4 KPIs Row + 2-Channel Oscilloscope & Phasors
+         ==================================================================== -->
+    <section class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+      
+      <!-- ====================================================================
+           COLUMNA IZQUIERDA (lg:col-span-5): FACTOR DE POTENCIA Y BANCO 1:2:4
+           ==================================================================== -->
+      <div class="lg:col-span-5 flex flex-col space-y-4">
+
+        <!-- 1. FACTOR DE POTENCIA: EL PROTAGONISTA ABSOLUTO -->
+        <div class="scada-card p-5 flex flex-col justify-between border-l-4 border-l-emerald-500 relative overflow-hidden">
+          
+          <div class="flex items-center justify-between pb-2 border-b border-scada-700/60">
+            <div>
+              <span class="text-[10px] font-mono uppercase tracking-wider text-slate-400">Objetivo del Sistema</span>
+              <h2 class="text-sm font-bold text-white tracking-wide font-sans">FACTOR DE POTENCIA</h2>
+            </div>
+            <span id="fpStatusBadge" class="px-2.5 py-0.5 rounded text-[11px] font-mono font-bold badge-optimo">
+              ÓPTIMO EN RANGO
+            </span>
+          </div>
+
+          <!-- Gauge Semicircular & Big Digital Value -->
+          <div class="my-4 flex flex-col items-center justify-center relative">
+            <!-- Canvas Gauge Semicircular -->
+            <div class="relative w-64 h-32 flex items-end justify-center">
+              <canvas id="fpGaugeCanvas" width="256" height="128" class="w-64 h-32"></canvas>
+              
+              <!-- Value in Center-Bottom of Dial -->
+              <div class="absolute bottom-0 text-center pb-1 pointer-events-none">
+                <div class="text-4xl sm:text-5xl font-mono font-extrabold text-emerald-400 tracking-tight tabular-nums" id="valFP">
+                  0.974
+                </div>
+                <div class="text-xs text-slate-400 font-mono flex items-center justify-center gap-1.5 mt-0.5">
+                  <span>cos φ</span>
+                  <span>•</span>
+                  <span>φ = <strong id="valPhiDeg" class="text-slate-200">13.0</strong>°</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Metric Details & Operating State -->
+          <div class="border-t border-scada-700/60 pt-3 grid grid-cols-2 gap-2 text-xs font-mono">
+            <div class="bg-scada-900/80 p-2 rounded border border-scada-700">
+              <span class="text-slate-500 block text-[10px]">Régimen Angular:</span>
+              <span id="valFpRegime" class="text-emerald-400 font-bold">ATRASO - 60 Hz</span>
+            </div>
+            <div class="bg-scada-900/80 p-2 rounded border border-scada-700">
+              <span class="text-slate-500 block text-[10px]">Δt Cruce por Cero:</span>
+              <span id="valDeltaT" class="text-slate-200 font-bold">0.60 ms</span>
+            </div>
+          </div>
+
+          <div class="mt-2 text-[11px] text-slate-400 flex items-center justify-between">
+            <span>Meta: <strong class="text-emerald-400 font-mono">0.950 – 0.990</strong></span>
+            <span id="fpConditionSummary" class="text-emerald-400 font-medium">Cumple Norma CFE</span>
+          </div>
+
+        </div>
+
+        <!-- 2. PANEL DEL BANCO DE CAPACITORES 1:2:4 -->
+        <div class="scada-card p-4 flex flex-col justify-between">
+          
+          <div class="flex items-center justify-between pb-2 border-b border-scada-700/60">
+            <div>
+              <h2 class="text-sm font-bold text-white tracking-wide font-sans">BANCO 1:2:4</h2>
+              <span class="text-[10px] text-slate-400 font-mono">Zero-Cross MOC3063 + TRIAC BTA16</span>
+            </div>
+            <div class="text-right">
+              <strong id="badgeCapTotal" class="text-sm font-mono font-bold text-cyan-400">105 µF</strong>
+              <span class="text-[10px] text-slate-400 font-mono block">Capacitancia activa</span>
+            </div>
+          </div>
+
+          <!-- 3 Compact Physical Steps -->
+          <div class="space-y-2.5 my-2.5">
+            
+            <!-- Paso 1: D4 (15 uF · Rojo) -->
+            <div class="flex items-center justify-between p-2 rounded-lg bg-scada-900 border border-scada-700 hover:border-scada-600 transition">
+              <div class="flex items-center space-x-2.5">
+                <div class="scada-led-bezel">
+                  <div id="ledCore1" class="scada-led-core led-red-on"></div>
+                </div>
+                <div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs font-mono font-bold text-red-400">D4 · 15 µF</span>
+                    <span class="text-[10px] text-slate-400 font-mono">(Bit 0)</span>
+                  </div>
+                  <div class="text-[10px] text-slate-400 font-mono">Q<sub>C1</sub> = 81.4 VAR · Ajuste Fino</div>
+                </div>
+              </div>
+
+              <!-- State Badge & Manual Button -->
+              <div class="flex items-center space-x-2">
+                <span id="ledStateText1" class="text-[11px] font-mono font-bold text-emerald-400">ON</span>
+                <button id="btnStepToggle1" class="px-2 py-1 rounded bg-scada-850 hover:bg-scada-800 border border-scada-700 text-[10px] font-mono text-slate-300 transition disabled:opacity-40" title="Conmutar Paso 1 manualmente">
+                  Paso 1
+                </button>
+              </div>
+            </div>
+
+            <!-- Paso 2: D5 (30 uF · Azul) -->
+            <div class="flex items-center justify-between p-2 rounded-lg bg-scada-900 border border-scada-700 hover:border-scada-600 transition">
+              <div class="flex items-center space-x-2.5">
+                <div class="scada-led-bezel">
+                  <div id="ledCore2" class="scada-led-core led-blue-on"></div>
+                </div>
+                <div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs font-mono font-bold text-blue-400">D5 · 30 µF</span>
+                    <span class="text-[10px] text-slate-400 font-mono">(Bit 1)</span>
+                  </div>
+                  <div class="text-[10px] text-slate-400 font-mono">Q<sub>C2</sub> = 162.9 VAR · Medio</div>
+                </div>
+              </div>
+
+              <!-- State Badge & Manual Button -->
+              <div class="flex items-center space-x-2">
+                <span id="ledStateText2" class="text-[11px] font-mono font-bold text-emerald-400">ON</span>
+                <button id="btnStepToggle2" class="px-2 py-1 rounded bg-scada-850 hover:bg-scada-800 border border-scada-700 text-[10px] font-mono text-slate-300 transition disabled:opacity-40" title="Conmutar Paso 2 manualmente">
+                  Paso 2
+                </button>
+              </div>
+            </div>
+
+            <!-- Paso 3: D6 (60 uF · Verde) -->
+            <div class="flex items-center justify-between p-2 rounded-lg bg-scada-900 border border-scada-700 hover:border-scada-600 transition">
+              <div class="flex items-center space-x-2.5">
+                <div class="scada-led-bezel">
+                  <div id="ledCore3" class="scada-led-core led-green-on"></div>
+                </div>
+                <div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs font-mono font-bold text-emerald-400">D6 · 60 µF</span>
+                    <span class="text-[10px] text-slate-400 font-mono">(Bit 2)</span>
+                  </div>
+                  <div class="text-[10px] text-slate-400 font-mono">Q<sub>C3</sub> = 325.7 VAR · Carga Base</div>
+                </div>
+              </div>
+
+              <!-- State Badge & Manual Button -->
+              <div class="flex items-center space-x-2">
+                <span id="ledStateText3" class="text-[11px] font-mono font-bold text-emerald-400">ON</span>
+                <button id="btnStepToggle3" class="px-2 py-1 rounded bg-scada-850 hover:bg-scada-800 border border-scada-700 text-[10px] font-mono text-slate-300 transition disabled:opacity-40" title="Conmutar Paso 3 manualmente">
+                  Paso 3
+                </button>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- 30-Second RC Discharge Safety Bar (Active Step Lock) -->
+          <div class="border-t border-scada-700/60 pt-2 text-[10px] font-mono">
+            <div class="flex items-center justify-between text-slate-400 mb-1">
+              <span>Protección Descarga RC (30s):</span>
+              <span id="lockStatusSummary" class="text-emerald-400 font-semibold">DISPONIBLE</span>
+            </div>
+            <div class="discharge-bar-bg w-full">
+              <div id="lockBarFill" class="discharge-bar-fill" style="width: 0%;"></div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- ====================================================================
+           COLUMNA DERECHA (lg:col-span-7): MOTOR WEG + 4 KPIs + OSCILOSCOPIO
+           ==================================================================== -->
+      <div class="lg:col-span-7 flex flex-col space-y-4">
+
+        <!-- 3. PANEL VISUAL DEL MOTOR WEG W01 0.5 HP -->
+        <div id="cardMotorWeg" class="scada-card p-4 flex flex-col justify-between motor-running-active">
+          
+          <div class="flex items-center justify-between pb-2 border-b border-scada-700/60">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" id="motorStatusDot"></span>
+              <h2 class="text-sm font-bold text-white tracking-wide font-sans">MOTOR WEG W01 — 0.5 HP</h2>
+            </div>
+            <span id="badgeMotorState" class="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+              ENCENDIDO
+            </span>
+          </div>
+
+          <!-- Technical Motor Isometric Illustration -->
+          <div class="my-2 flex items-center justify-center relative h-36 w-full">
+            <div id="motorSvgContainer" class="w-full h-full flex items-center justify-center">
+              <img src="motor_weg.svg" alt="Motor WEG W01" class="max-h-36 w-auto object-contain filter drop-shadow-md" onerror="this.onerror=null; this.src='motor_weg.png';" />
+            </div>
+
+            <!-- Dynamic rotation animation indicator overlay on the shaft -->
+            <div id="motorRunningIndicator" class="absolute bottom-2 right-4 flex items-center gap-1.5 bg-scada-950/80 border border-scada-700 px-2 py-0.5 rounded text-[10px] font-mono text-cyan-400">
+              <span class="inline-block animate-spin text-cyan-400">⚙</span>
+              <span>1735 RPM</span>
+            </div>
+          </div>
+
+          <!-- Motor Electrical Telemetry Summary -->
+          <div class="border-t border-scada-700/60 pt-2 grid grid-cols-3 gap-2 text-center text-xs font-mono">
+            <div class="bg-scada-900/60 p-1.5 rounded border border-scada-700">
+              <span class="text-slate-500 block text-[10px]">Carga:</span>
+              <span id="motorLoadText" class="text-cyan-300 font-semibold text-[11px]">En Vacío</span>
+            </div>
+            <div class="bg-scada-900/60 p-1.5 rounded border border-scada-700">
+              <span class="text-slate-500 block text-[10px]">P útil:</span>
+              <span id="motorPText" class="text-white font-semibold text-[11px]">130 W</span>
+            </div>
+            <div class="bg-scada-900/60 p-1.5 rounded border border-scada-700">
+              <span class="text-slate-500 block text-[10px]">I nominal:</span>
+              <span class="text-slate-300 text-[11px]">8.24 A</span>
+            </div>
+          </div>
+
+          <div class="mt-2 text-[10px] text-slate-400 flex items-center justify-between font-mono">
+            <span>0.5 HP · 60 Hz</span>
+            <span>115 / 120 V AC monofásico</span>
+          </div>
+
+        </div>
+
+        <!-- 4. 4 KPI CARDS HORIZONTAL STRIP (TENSIÓN, CORRIENTE, ACTIVA, REACTIVA) -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          
+          <!-- 1. Tensión RMS -->
+          <div class="scada-card p-3 flex flex-col justify-between">
+            <div class="flex items-center justify-between text-slate-400 text-xs">
+              <span class="font-medium font-sans">TENSIÓN</span>
+              <span class="text-[9px] font-mono text-slate-500">A0</span>
+            </div>
+            <div class="my-1 flex items-baseline">
+              <span id="valVrms" class="text-2xl sm:text-3xl font-mono font-bold text-white tabular-nums tracking-tight">120.0</span>
+              <span class="text-xs font-mono text-slate-400 ml-1">V</span>
+            </div>
+            <div class="text-[10px] text-slate-400 flex items-center justify-between border-t border-scada-700 pt-1">
+              <span>60.0 Hz</span>
+              <span class="text-emerald-400 font-mono">±0.2 V</span>
+            </div>
+          </div>
+
+          <!-- 2. Corriente RMS & Reducción % -->
+          <div class="scada-card p-3 flex flex-col justify-between">
+            <div class="flex items-center justify-between text-slate-400 text-xs">
+              <span class="font-medium font-sans">CORRIENTE</span>
+              <span class="text-[9px] font-mono text-slate-500">A1</span>
+            </div>
+            <div class="my-1 flex items-baseline justify-between">
+              <div class="flex items-baseline">
+                <span id="valIrms" class="text-2xl sm:text-3xl font-mono font-bold text-cyan-400 tabular-nums tracking-tight">1.11</span>
+                <span class="text-xs font-mono text-slate-400 ml-1">A</span>
+              </div>
+              <span id="valIReduction" class="text-[10px] font-mono px-1 py-0.2 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                -78%
+              </span>
+            </div>
+            <div class="text-[10px] text-slate-400 flex items-center justify-between border-t border-scada-700 pt-1">
+              <span>Pico:</span>
+              <span class="text-amber-400 font-mono font-bold flex items-center gap-1">
+                <span id="valIPeak">13.8 A</span>
+                <button id="btnResetPeak" class="text-slate-500 hover:text-slate-300 text-[9px]" title="Resetear Max-Hold">↺</button>
+              </span>
+            </div>
+          </div>
+
+          <!-- 3. Potencia Activa (W) -->
+          <div class="scada-card p-3 flex flex-col justify-between">
+            <div class="flex items-center justify-between text-slate-400 text-xs">
+              <span class="font-medium font-sans">ACTIVA</span>
+              <span class="text-[9px] font-mono text-slate-500">Real</span>
+            </div>
+            <div class="my-1 flex items-baseline">
+              <span id="valP" class="text-2xl sm:text-3xl font-mono font-bold text-white tabular-nums tracking-tight">130.0</span>
+              <span class="text-xs font-mono text-slate-400 ml-1">W</span>
+            </div>
+            <div class="text-[10px] text-slate-400 flex items-center justify-between border-t border-scada-700 pt-1">
+              <span>Carga:</span>
+              <span id="valPLoadPct" class="text-cyan-400 font-mono">En Vacío</span>
+            </div>
+          </div>
+
+          <!-- 4. Potencia Reactiva Neta (VAR) -->
+          <div class="scada-card p-3 flex flex-col justify-between">
+            <div class="flex items-center justify-between text-slate-400 text-xs">
+              <span class="font-medium font-sans">REACTIVA</span>
+              <span id="badgeQState" class="text-[9px] font-mono px-1 py-0.2 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">ATRASO</span>
+            </div>
+            <div class="my-1 flex items-baseline">
+              <span id="valQ" class="text-2xl sm:text-3xl font-mono font-bold text-white tabular-nums tracking-tight">30.0</span>
+              <span class="text-xs font-mono text-slate-400 ml-1">VAR</span>
+            </div>
+            <div class="text-[10px] text-slate-400 flex items-center justify-between border-t border-scada-700 pt-1 font-mono">
+              <span>Q<sub>m</sub>: <strong id="valQMotorText" class="text-slate-300">600</strong></span>
+              <span>Q<sub>c</sub>: <strong id="valQInjectedText" class="text-cyan-400">-570</strong></span>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 5. OSCILOSCOPIO DIGITAL DE 2 CANALES & FASORES -->
+        <div class="scada-card p-4 flex flex-col justify-between">
+          <div class="flex items-center justify-between pb-2 border-b border-scada-700/60">
+            <div class="flex items-center space-x-2">
+              <span class="w-2 h-2 rounded-full bg-cyan-400"></span>
+              <h3 class="text-xs font-bold text-white font-sans uppercase tracking-wider">OSCILOSCOPIO</h3>
+              <span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">60 Hz</span>
+            </div>
+            
+            <div class="flex items-center space-x-2.5 text-xs font-mono">
+              <span class="text-yellow-400 flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-yellow-400 inline-block"></span> CH1 · Tensión
+              </span>
+              <span class="text-cyan-400 flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-cyan-400 inline-block"></span> CH2 · Corriente
+              </span>
+              <button id="btnPauseScope" class="px-2 py-0.5 rounded bg-scada-850 hover:bg-scada-800 text-slate-300 border border-scada-700 text-[10px] transition">
+                Pausa
+              </button>
+            </div>
+          </div>
+
+          <!-- Scope Canvas Bezel -->
+          <div class="tek-bezel relative w-full h-52 my-2">
+            <canvas id="scopeCanvas" class="w-full h-full block"></canvas>
+            
+            <!-- Oscilloscope HUD Metrics Overlay -->
+            <div class="absolute top-2 left-2.5 bg-black/75 backdrop-blur-sm p-1.5 rounded border border-white/10 text-[10px] font-mono space-y-0.5 pointer-events-none">
+              <div><span class="text-yellow-400 font-semibold">CH1:</span> <span id="hudVpp">339.4 Vp-p</span></div>
+              <div><span class="text-cyan-400 font-semibold">CH2:</span> <span id="hudIpp">3.1 Ap-p (1.11 Arms)</span></div>
+              <div><span class="text-emerald-400 font-semibold">Δt:</span> <span id="hudDt">0.60 ms</span> (<span id="hudPhi">13.0°</span>)</div>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between text-[11px] text-slate-400 font-mono pt-1 border-t border-scada-700/60">
+            <span>Base: <strong>2.0 ms/div</strong></span>
+            <span>fs = 1920 Hz (32 m/c)</span>
+            <span>Trigger: v(t) = 0</span>
+          </div>
+
+          <!-- Hidden container to keep triangle canvas accessible in dom for update loop -->
+          <div class="hidden">
+            <canvas id="triangleCanvas" width="300" height="200"></canvas>
+            <span id="triS1"></span>
+            <span id="triS2"></span>
+          </div>
+        </div>
+
+      </div>
+
+    </section>
+
+    <!-- Row 5: Bottom Health & Alarms Status Bar -->
+    <section class="scada-card scada-card-compact flex flex-wrap items-center justify-between gap-3 text-xs">
+      
+      <!-- System Health Indicator -->
+      <div class="flex items-center space-x-3">
+        <div class="flex items-center space-x-1.5 text-emerald-400 font-medium">
+          <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+          </svg>
+          <span class="font-sans">Sistema protegido</span>
+        </div>
+
+        <span class="text-slate-600 hidden sm:inline">•</span>
+
+        <!-- Subsystems Quick Status -->
+        <div class="hidden sm:flex items-center space-x-2.5 text-[11px] text-slate-400 font-mono">
+          <span>Sensores A0/A1: <strong class="text-emerald-400">OK</strong></span>
+          <span>Zero-Cross: <strong class="text-emerald-400">ACTIVO</strong></span>
+          <span>Descarga 30s: <strong class="text-emerald-400">ARMADA</strong></span>
+        </div>
+      </div>
+
+      <!-- Alarms Count Badges & Trigger -->
+      <div class="flex items-center space-x-2">
+        <span id="badgeCritCount" class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
+          0 críticas
+        </span>
+        <span id="badgeWarnCount" class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+          0 advertencias
+        </span>
+        <button id="btnFooterOpenAlarms" class="px-2.5 py-1 rounded bg-scada-850 hover:bg-scada-800 text-slate-300 border border-scada-700 text-[11px] font-medium transition flex items-center gap-1">
+          <span>Ver Alarmas</span>
         </button>
-        <button id="btnSendCalib" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition flex items-center gap-1 font-mono text-[11px]" title="Comando serie 'c': Calibración de offsets de tierra virtual VB">
-          <span>Calibrar VB [c]</span>
-        </button>
-        <button id="btnSendOff" class="px-2.5 py-1 rounded bg-rose-950/50 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 transition flex items-center gap-1 font-mono text-[11px]" title="Comando serie '0': Desconectar todos los capacitores">
-          <span>Apagar Todo [0]</span>
-        </button>
-        <button id="btnExportCSV" class="px-2.5 py-1 rounded bg-sky-950/60 hover:bg-sky-900/60 text-sky-300 border border-sky-800/60 transition flex items-center gap-1 font-medium text-[11px]">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <button id="btnQuickExportCSV" class="px-2.5 py-1 rounded bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-300 border border-cyan-800/60 text-[11px] font-medium transition flex items-center gap-1">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
           </svg>
           <span>Exportar CSV</span>
         </button>
       </div>
 
-    </div>
-  </section>
+    </section>
+
+  </main>
 
   <!-- ========================================================================
-       MAIN DASHBOARD CONTENT AREA
+       TAB 2: INGENIERÍA Y CÁLCULOS (TRUTH TABLE & LIVE MATH MEMO)
        ======================================================================== -->
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 flex-1 w-full">
-
-    <!-- 1. KPI CARDS SECTION (VOLTAGE, CURRENT, ACTIVE POWER, REACTIVE, APPARENT, PF GAUGE) -->
-    <section class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
-      
-      <!-- Tensión Eficaz Vrms -->
-      <div class="glass-panel p-3.5 sm:p-4 rounded-xl card-hover-fx relative overflow-hidden flex flex-col justify-between">
-        <div class="flex items-center justify-between text-slate-400 text-xs">
-          <span class="font-medium">Tensión V<sub>rms</sub></span>
-          <span class="px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-400 text-[10px] font-mono border border-yellow-500/20">A0 · T1</span>
-        </div>
-        <div class="my-2">
-          <div class="text-2xl sm:text-3xl font-mono font-bold text-white tracking-tight flex items-baseline">
-            <span id="valVrms">120.0</span>
-            <span class="text-xs font-sans text-slate-400 ml-1">V</span>
-          </div>
-        </div>
-        <div class="text-[11px] text-slate-400 flex items-center justify-between border-t border-slate-800/80 pt-1.5">
-          <span>f = 60.0 Hz</span>
-          <span class="text-emerald-400">Nominal 120V</span>
-        </div>
-      </div>
-
-      <!-- Corriente Total Irms & Reducción de I & Pico de Arranque 10-15A -->
-      <div class="glass-panel p-3.5 sm:p-4 rounded-xl card-hover-fx relative overflow-hidden flex flex-col justify-between">
-        <div class="flex items-center justify-between text-slate-400 text-xs">
-          <span class="font-medium">Corriente I<sub>rms</sub></span>
-          <span class="px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 text-[10px] font-mono border border-cyan-500/20">A1 · ACS712-30A</span>
-        </div>
-        <div class="my-1.5">
-          <div class="text-2xl sm:text-3xl font-mono font-bold text-white tracking-tight flex items-baseline">
-            <span id="valIrms">5.44</span>
-            <span class="text-xs font-sans text-slate-400 ml-1">A</span>
-          </div>
-          <!-- Inrush Peak Max-Hold Indicator (10-15A) -->
-          <div class="flex items-center justify-between mt-1 text-[10px] font-mono bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-800">
-            <span class="text-slate-400 flex items-center gap-1">
-              <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-              Pico Máx:
-            </span>
-            <div class="flex items-center gap-1">
-              <strong id="valIPeak" class="text-amber-300 font-bold">13.8 A</strong>
-              <button id="btnResetPeak" class="text-slate-500 hover:text-slate-300 text-[9px] px-1 hover:bg-slate-800 rounded transition" title="Reiniciar valor pico de corriente">↺</button>
-            </div>
-          </div>
-        </div>
-        <div class="text-[11px] text-slate-400 flex items-center justify-between border-t border-slate-800/80 pt-1.5">
-          <span>Alivio I:</span>
-          <span id="valIReduction" class="text-slate-400 font-mono">0.0%</span>
-        </div>
-      </div>
-
-      <!-- Potencia Activa P (W) -->
-      <div class="glass-panel p-3.5 sm:p-4 rounded-xl card-hover-fx relative overflow-hidden flex flex-col justify-between">
-        <div class="flex items-center justify-between text-slate-400 text-xs">
-          <span class="font-medium">Pot. Activa P</span>
-          <span class="text-[10px] text-slate-500 font-mono">Trabajo Útil</span>
-        </div>
-        <div class="my-2">
-          <div class="text-2xl sm:text-3xl font-mono font-bold text-white tracking-tight flex items-baseline">
-            <span id="valP">130.0</span>
-            <span class="text-xs font-sans text-slate-400 ml-1">W</span>
-          </div>
-        </div>
-        <div class="text-[11px] text-slate-400 flex items-center justify-between border-t border-slate-800/80 pt-1.5">
-          <span>Motor WEG:</span>
-          <span id="valPLoadPct" class="text-emerald-400 font-mono">En Vacío (Lab)</span>
-        </div>
-      </div>
-
-      <!-- Potencia Reactiva Neta Q (VAR) -->
-      <div class="glass-panel p-3.5 sm:p-4 rounded-xl card-hover-fx relative overflow-hidden flex flex-col justify-between">
-        <div class="flex items-center justify-between text-slate-400 text-xs">
-          <span class="font-medium">Pot. Reactiva Q</span>
-          <span id="badgeQState" class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-500/10 text-amber-400 border border-amber-500/20">ATRASO</span>
-        </div>
-        <div class="my-2">
-          <div class="text-2xl sm:text-3xl font-mono font-bold text-white tracking-tight flex items-baseline">
-            <span id="valQ">640.0</span>
-            <span class="text-xs font-sans text-slate-400 ml-1">VAR</span>
-          </div>
-        </div>
-        <div class="text-[11px] text-slate-400 flex items-center justify-between border-t border-slate-800/80 pt-1.5">
-          <span>Q<sub>inyectada</sub>:</span>
-          <span id="valQInjected" class="text-sky-400 font-mono">0.0 VAR</span>
-        </div>
-      </div>
-
-      <!-- Potencia Aparente S (VA) -->
-      <div class="glass-panel p-3.5 sm:p-4 rounded-xl card-hover-fx relative overflow-hidden flex flex-col justify-between">
-        <div class="flex items-center justify-between text-slate-400 text-xs">
-          <span class="font-medium">Pot. Aparente S</span>
-          <span class="text-[10px] text-slate-500 font-mono">V<sub>rms</sub> · I<sub>rms</sub></span>
-        </div>
-        <div class="my-2">
-          <div class="text-2xl sm:text-3xl font-mono font-bold text-white tracking-tight flex items-baseline">
-            <span id="valS">653.1</span>
-            <span class="text-xs font-sans text-slate-400 ml-1">VA</span>
-          </div>
-        </div>
-        <div class="text-[11px] text-slate-400 flex items-center justify-between border-t border-slate-800/80 pt-1.5">
-          <span>Δt Cruce Cero:</span>
-          <span id="valDeltaT" class="text-slate-300 font-mono">3.63 ms</span>
-        </div>
-      </div>
-
-      <!-- Medidor Analógico-Digital de Factor de Potencia (FP) -->
-      <div class="glass-panel p-3.5 sm:p-4 rounded-xl card-hover-fx relative overflow-hidden flex flex-col justify-between border-l-4 border-l-rose-500">
-        <div class="flex items-center justify-between text-slate-400 text-xs">
-          <span class="font-medium text-white">Factor de Potencia</span>
-          <span id="fpStatusBadge" class="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">DEFICIENTE</span>
-        </div>
-        
-        <!-- Large Dial / Gauge Metric -->
-        <div class="my-1 flex items-center justify-between">
-          <div>
-            <div class="text-3xl sm:text-4xl font-mono font-extrabold text-white tracking-tight">
-              <span id="valFP">0.199</span>
-            </div>
-            <div class="text-[11px] text-slate-400 font-mono mt-0.5">
-              φ = <span id="valPhiDeg">78.5</span>°
-            </div>
-          </div>
-          
-          <!-- Mini Radial Arc Gauge -->
-          <div class="relative w-14 h-14 flex items-center justify-center">
-            <svg class="w-14 h-14 -rotate-90 transform" viewBox="0 0 36 36">
-              <path class="text-slate-800" stroke-width="3.5" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-              <path id="fpGaugeProgress" class="text-rose-500 transition-all duration-500 ease-out" stroke-dasharray="20, 100" stroke-width="3.5" stroke-linecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-            </svg>
-            <span class="absolute text-[10px] font-mono text-slate-300">cos φ</span>
-          </div>
-        </div>
-
-        <div class="text-[10px] text-slate-400 border-t border-slate-800/80 pt-1 flex justify-between">
-          <span>Meta: <strong class="text-emerald-400">0.95 - 0.99</strong></span>
-          <span id="fpZoneLabel" class="text-rose-400 font-medium">Vacío (Máx 0.20)</span>
-        </div>
-      </div>
-
-    </section>
-
-    <!-- BANNER DE CONDICIÓN REAL DE LABORATORIO -->
-    <div class="glass-panel-subtle px-4 py-2.5 rounded-xl border border-sky-500/30 bg-sky-950/20 text-xs text-slate-300 flex flex-wrap items-center justify-between gap-2 shadow-sm">
-      <div class="flex items-center gap-2">
-        <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
-        <span>
-          <strong class="text-white">Condición de Prueba Real en Laboratorio:</strong> Motor WEG W01 operando permanentemente en vacío. 
-          <span class="text-amber-300">FP máx sin compensar ≈ <strong>0.18 - 0.20</strong></span> y transitorio de arranque con pico entre <span class="text-cyan-300"><strong>10 y 15 A</strong></span> medido por el ACS712-30A.
-        </span>
-      </div>
-      <span class="font-mono text-[11px] text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30 flex items-center gap-1">
-        <span>✓ Banco 105 µF eleva FP a &gt; 0.95</span>
-      </span>
-    </div>
-
-    </section>
-
-    <!-- ========================================================================
-         2. PANEL VISUAL DESTACADO: ESTADO DEL BANCO DE CAPACITORES Y LEDS (1:2:4)
-         ======================================================================== -->
-    <section class="glass-panel p-5 sm:p-6 rounded-2xl border-slate-700/80 shadow-2xl relative">
-      <div class="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-slate-800 gap-3">
+  <main id="tabEngineering" class="tab-content max-w-7xl mx-auto px-4 sm:px-6 py-4 space-y-6 flex-1 w-full">
+    
+    <!-- 1. Truth Table 1:2:4 (8 Combinations 000 to 111) -->
+    <section class="scada-card p-5">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-scada-700 gap-2">
         <div>
-          <h2 class="text-base sm:text-lg font-bold text-white flex items-center gap-2.5">
-            <span class="w-3 h-3 rounded-full bg-sky-400 animate-pulse"></span>
-            Estado del Banco de Capacitores y LEDs de Control (Ponderación Binaria 1:2:4)
-          </h2>
-          <p class="text-xs text-slate-400 mt-0.5">
-            Conmutación estática con optotriacs MOC3063 (cruce por cero) + TRIACs BTA16-600CW con NTC 5D-9 y descarga permanente de 100 kΩ / 2W.
-          </p>
-        </div>
-        
-        <!-- Summary Badges for the Bank -->
-        <div class="flex flex-wrap items-center gap-3">
-          <div class="bg-slate-900/90 border border-slate-800 px-3 py-1.5 rounded-lg text-xs font-mono">
-            <span class="text-slate-400">Capacitancia Activa:</span>
-            <strong id="badgeCapTotal" class="text-sky-400 text-sm ml-1">0.0 µF</strong>
-            <span class="text-slate-500">/ 105 µF</span>
-          </div>
-          <div class="bg-slate-900/90 border border-slate-800 px-3 py-1.5 rounded-lg text-xs font-mono">
-            <span class="text-slate-400">Combinación Binaria:</span>
-            <strong id="badgeBinaryCode" class="text-emerald-400 text-sm ml-1">[0, 0, 0]</strong>
-            <span class="text-slate-500">(Paso 0/7)</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- The 3 Realistic Optical LED Channels (Rojo, Azul, Verde) -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6">
-        
-        <!-- ==================== LED 1: ROJO (D4 - C1 15 uF) ==================== -->
-        <div class="glass-panel-subtle p-5 rounded-xl border border-slate-800/80 hover:border-red-500/40 transition duration-300 flex flex-col justify-between">
-          <div class="flex items-start justify-between">
-            <div>
-              <div class="flex items-center gap-2">
-                <span class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
-                <span class="text-xs font-mono font-semibold text-red-400 uppercase tracking-wider">Pin D4 · Paso 1</span>
-              </div>
-              <h3 class="text-base font-bold text-white mt-1">LED ROJO — C<sub>1</sub> = 15 µF</h3>
-              <p class="text-xs text-slate-400 font-mono">Q<sub>C1</sub> = 81.4 VAR · I<sub>C1</sub> = 0.68 A</p>
-            </div>
-            <span id="badgeStateLed1" class="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700">OFF (0)</span>
-          </div>
-
-          <!-- 3D Optical Diode Visualization -->
-          <div class="my-6 flex flex-col items-center justify-center">
-            <div id="bezelLed1" class="led-bezel">
-              <div id="coreLed1" class="led-core led-red led-off"></div>
-            </div>
-            <span class="text-[11px] font-mono text-slate-400 mt-2">Rama U3 / TR1 (MOC3063 + BTA16)</span>
-          </div>
-
-          <!-- Description & Technical Details -->
-          <p class="text-xs text-slate-300 leading-relaxed border-t border-slate-800/80 pt-3">
-            <strong class="text-red-400 font-medium">Peso Binario 1 (Ajuste Fino):</strong> Inyecta 81.4 VAR para correcciones precisas dentro de la banda de histéresis objetivo (0.95 - 0.99).
-          </p>
-
-          <!-- 30-Second RC Discharge Safety Bar -->
-          <div class="mt-4 pt-3 border-t border-slate-800/80 space-y-1.5">
-            <div class="flex items-center justify-between text-[11px]">
-              <span class="text-slate-400 flex items-center gap-1">
-                <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Bloqueo Descarga (30s RC):
-              </span>
-              <span id="lockTimerText1" class="font-mono text-emerald-400 text-xs font-semibold">Listo / 0.0V</span>
-            </div>
-            <div class="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-800">
-              <div id="lockProgressBar1" class="bg-gradient-to-r from-red-500 to-amber-500 h-full w-0 transition-all duration-300"></div>
-            </div>
-            <p class="text-[10px] text-slate-500 font-mono">τ = R·C = 100kΩ · 15µF = 1.5 s (5τ = 7.5s)</p>
-          </div>
-
-          <!-- Manual Action Button -->
-          <div class="mt-4">
-            <button id="btnToggleStep1" class="w-full py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium font-mono flex items-center justify-center gap-2 transition active:scale-98 disabled:opacity-40 disabled:cursor-not-allowed">
-              <span>Conmutar Paso 1 [1]</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- ==================== LED 2: AZUL (D5 - C2 30 uF) ==================== -->
-        <div class="glass-panel-subtle p-5 rounded-xl border border-slate-800/80 hover:border-blue-500/40 transition duration-300 flex flex-col justify-between">
-          <div class="flex items-start justify-between">
-            <div>
-              <div class="flex items-center gap-2">
-                <span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
-                <span class="text-xs font-mono font-semibold text-blue-400 uppercase tracking-wider">Pin D5 · Paso 2</span>
-              </div>
-              <h3 class="text-base font-bold text-white mt-1">LED AZUL — C<sub>2</sub> = 30 µF</h3>
-              <p class="text-xs text-slate-400 font-mono">Q<sub>C2</sub> = 162.9 VAR · I<sub>C2</sub> = 1.36 A</p>
-            </div>
-            <span id="badgeStateLed2" class="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700">OFF (0)</span>
-          </div>
-
-          <!-- 3D Optical Diode Visualization -->
-          <div class="my-6 flex flex-col items-center justify-center">
-            <div id="bezelLed2" class="led-bezel">
-              <div id="coreLed2" class="led-core led-blue led-off"></div>
-            </div>
-            <span class="text-[11px] font-mono text-slate-400 mt-2">Rama U4 / TR2 (MOC3063 + BTA16)</span>
-          </div>
-
-          <!-- Description & Technical Details -->
-          <p class="text-xs text-slate-300 leading-relaxed border-t border-slate-800/80 pt-3">
-            <strong class="text-blue-400 font-medium">Peso Binario 2 (Escalón Intermedio):</strong> Inyecta 162.9 VAR para compensación media al entrar transitorios o cargas intermedias.
-          </p>
-
-          <!-- 30-Second RC Discharge Safety Bar -->
-          <div class="mt-4 pt-3 border-t border-slate-800/80 space-y-1.5">
-            <div class="flex items-center justify-between text-[11px]">
-              <span class="text-slate-400 flex items-center gap-1">
-                <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Bloqueo Descarga (30s RC):
-              </span>
-              <span id="lockTimerText2" class="font-mono text-emerald-400 text-xs font-semibold">Listo / 0.0V</span>
-            </div>
-            <div class="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-800">
-              <div id="lockProgressBar2" class="bg-gradient-to-r from-blue-500 to-amber-500 h-full w-0 transition-all duration-300"></div>
-            </div>
-            <p class="text-[10px] text-slate-500 font-mono">τ = R·C = 100kΩ · 30µF = 3.0 s (5τ = 15.0s)</p>
-          </div>
-
-          <!-- Manual Action Button -->
-          <div class="mt-4">
-            <button id="btnToggleStep2" class="w-full py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium font-mono flex items-center justify-center gap-2 transition active:scale-98 disabled:opacity-40 disabled:cursor-not-allowed">
-              <span>Conmutar Paso 2 [2]</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- ==================== LED 3: VERDE (D6 - C3 60 uF) ==================== -->
-        <div class="glass-panel-subtle p-5 rounded-xl border border-slate-800/80 hover:border-emerald-500/40 transition duration-300 flex flex-col justify-between">
-          <div class="flex items-start justify-between">
-            <div>
-              <div class="flex items-center gap-2">
-                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                <span class="text-xs font-mono font-semibold text-emerald-400 uppercase tracking-wider">Pin D6 · Paso 3</span>
-              </div>
-              <h3 class="text-base font-bold text-white mt-1">LED VERDE — C<sub>3</sub> = 60 µF</h3>
-              <p class="text-xs text-slate-400 font-mono">Q<sub>C3</sub> = 325.7 VAR · I<sub>C3</sub> = 2.71 A</p>
-            </div>
-            <span id="badgeStateLed3" class="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700">OFF (0)</span>
-          </div>
-
-          <!-- 3D Optical Diode Visualization -->
-          <div class="my-6 flex flex-col items-center justify-center">
-            <div id="bezelLed3" class="led-bezel">
-              <div id="coreLed3" class="led-core led-green led-off"></div>
-            </div>
-            <span class="text-[11px] font-mono text-slate-400 mt-2">Rama U5 / TR3 (MOC3063 + BTA16)</span>
-          </div>
-
-          <!-- Description & Technical Details -->
-          <p class="text-xs text-slate-300 leading-relaxed border-t border-slate-800/80 pt-3">
-            <strong class="text-emerald-400 font-medium">Peso Binario 4 (Carga Base):</strong> Inyecta 325.7 VAR para absorber la reactiva magnetizante principal del motor de inducción WEG.
-          </p>
-
-          <!-- 30-Second RC Discharge Safety Bar -->
-          <div class="mt-4 pt-3 border-t border-slate-800/80 space-y-1.5">
-            <div class="flex items-center justify-between text-[11px]">
-              <span class="text-slate-400 flex items-center gap-1">
-                <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Bloqueo Descarga (30s RC):
-              </span>
-              <span id="lockTimerText3" class="font-mono text-emerald-400 text-xs font-semibold">Listo / 0.0V</span>
-            </div>
-            <div class="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-800">
-              <div id="lockProgressBar3" class="bg-gradient-to-r from-emerald-500 to-amber-500 h-full w-0 transition-all duration-300"></div>
-            </div>
-            <p class="text-[10px] text-slate-500 font-mono">τ = R·C = 100kΩ · 60µF = 6.0 s (5τ = 30.0s)</p>
-          </div>
-
-          <!-- Manual Action Button -->
-          <div class="mt-4">
-            <button id="btnToggleStep3" class="w-full py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium font-mono flex items-center justify-center gap-2 transition active:scale-98 disabled:opacity-40 disabled:cursor-not-allowed">
-              <span>Conmutar Paso 3 [3]</span>
-            </button>
-          </div>
-        </div>
-
-      </div>
-    </section>
-
-    <!-- ========================================================================
-         3. REAL-TIME INSTRUMENTATION: OSCILLOSCOPE & POWER TRIANGLE GRAPHS
-         ======================================================================== -->
-    <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
-      
-      <!-- Oscilloscope: Dual Channel v(t) & i(t) -->
-      <div class="lg:col-span-7 glass-panel p-5 rounded-2xl flex flex-col justify-between">
-        <div class="flex flex-wrap items-center justify-between pb-3 border-b border-slate-800 gap-2">
-          <div>
-            <h3 class="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-              <svg class="w-4 h-4 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-              </svg>
-              Osciloscopio Digital de 2 Canales (Sincronización en Fase)
-            </h3>
-            <p class="text-xs text-slate-400">Canal 1: v(t) [Amarillo] · Canal 2: i(t) [Cian]. Observa la alineación fasorial al compensar.</p>
-          </div>
-
-          <!-- Channel Legends & Status -->
-          <div class="flex items-center gap-3 text-xs font-mono">
-            <span class="flex items-center gap-1.5 text-yellow-400">
-              <span class="w-3 h-1 bg-yellow-400 rounded-sm"></span> CH1: v(t)
-            </span>
-            <span class="flex items-center gap-1.5 text-cyan-400">
-              <span class="w-3 h-1 bg-cyan-400 rounded-sm"></span> CH2: i(t)
-            </span>
-            <button id="btnPauseScope" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[11px] transition">
-              Pausa
-            </button>
-          </div>
-        </div>
-
-        <!-- Scope Canvas Container -->
-        <div class="my-4 crt-bezel relative w-full h-64 sm:h-72">
-          <canvas id="scopeCanvas" class="w-full h-full block"></canvas>
-          
-          <!-- On-screen Measurement HUD -->
-          <div class="absolute top-2 left-3 text-[11px] font-mono text-slate-300/80 pointer-events-none space-y-0.5 bg-black/40 backdrop-blur-sm p-1.5 rounded border border-white/5">
-            <div><span class="text-yellow-400 font-bold">CH1:</span> <span id="hudVpp">339.4 Vp-p</span> (120.0 Vrms)</div>
-            <div><span class="text-cyan-400 font-bold">CH2:</span> <span id="hudIpp">23.3 Ap-p</span> (8.24 Arms)</div>
-            <div><span class="text-emerald-400 font-bold">Desfase φ:</span> <span id="hudPhi">51.7°</span> (Δt = <span id="hudDt">2.41 ms</span>)</div>
-          </div>
-        </div>
-
-        <!-- Scope Controls (Timebase & Scaling) -->
-        <div class="flex flex-wrap items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800 gap-2">
-          <div class="flex items-center gap-3">
-            <span>Base de Tiempo: <strong class="text-slate-200 font-mono">2.0 ms/div</strong></span>
-            <span>Muestreo: <strong class="text-slate-200 font-mono">1920 Hz (32 m/c)</strong></span>
-          </div>
-          <div class="text-[11px] text-slate-500 font-mono">
-            Trigger: Cruce por Cero (Flanco de Subida v[k])
-          </div>
-        </div>
-      </div>
-
-      <!-- Power Triangle & Vector Phasor Diagram -->
-      <div class="lg:col-span-5 glass-panel p-5 rounded-2xl flex flex-col justify-between">
-        <div class="pb-3 border-b border-slate-800">
-          <h3 class="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-            <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
-            </svg>
-            Triángulo de Potencias Dinámico (P, Q, S)
-          </h3>
-          <p class="text-xs text-slate-400">Representación vectorial en el plano complejo de la compensación reactiva.</p>
-        </div>
-
-        <!-- Power Triangle Canvas -->
-        <div class="my-4 triangle-container relative w-full h-64 sm:h-72 flex items-center justify-center p-2">
-          <canvas id="triangleCanvas" class="w-full h-full block"></canvas>
-        </div>
-
-        <!-- Power Vector Measurements Breakdown -->
-        <div class="grid grid-cols-2 gap-2 text-xs font-mono border-t border-slate-800 pt-3">
-          <div class="bg-slate-900/70 p-2 rounded border border-slate-800">
-            <span class="text-slate-400 block text-[10px]">Sin Compensar (Paso 0):</span>
-            <div class="text-slate-200 mt-0.5">S<sub>1</sub> = <span id="triS1">948</span> VA</div>
-            <div class="text-amber-400 text-[11px]">Q<sub>L</sub> = <span id="triQL">744</span> VAR (FP 0.62)</div>
-          </div>
-          <div class="bg-slate-900/70 p-2 rounded border border-slate-800">
-            <span class="text-slate-400 block text-[10px]">Compensado Actual:</span>
-            <div class="text-emerald-400 font-bold mt-0.5">S<sub>2</sub> = <span id="triS2">605</span> VA</div>
-            <div class="text-sky-400 text-[11px]">Q<sub>neta</sub> = <span id="triQnet">144</span> VAR (<span id="triFP">0.97</span>)</div>
-          </div>
-        </div>
-      </div>
-
-    </section>
-
-    <!-- ========================================================================
-         4. TRUTH TABLE OF THE 8 STEP COMBINATIONS (000 to 111)
-         ======================================================================== -->
-    <section class="glass-panel p-5 rounded-2xl">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-800 gap-2">
-        <div>
-          <h3 class="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-            <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <h2 class="text-sm sm:text-base font-bold text-white font-sans flex items-center gap-2">
+            <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
             </svg>
-            Tabla de Verdad del Banco de Capacitores (8 Combinaciones Binarias 1:2:4)
-          </h3>
-          <p class="text-xs text-slate-400">Resalta en tiempo real la combinación activa. Haz clic en cualquier fila para seleccionarla en modo manual.</p>
+            Tabla de Verdad del Banco de Capacitores 1:2:4 (8 Combinaciones Binarias)
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">
+            Muestra la capacitancia total, reactiva inyectada $Q_C = \omega C V^2$ y el FP estimado para la carga actual.
+          </p>
         </div>
-        <span class="text-xs text-slate-400 font-mono">Rango: 0 µF a 105 µF (Resolución 15 µF)</span>
+        <span class="text-xs text-slate-400 font-mono">0 a 105 µF (Resolución: 15 µF)</span>
       </div>
 
       <div class="overflow-x-auto mt-4">
-        <table class="w-full text-left text-xs font-mono truth-table border-collapse">
+        <table class="w-full text-left text-xs font-mono border-collapse">
           <thead>
-            <tr class="border-b border-slate-800 text-slate-400 bg-slate-900/60">
+            <tr class="border-b border-scada-700 text-slate-400 bg-scada-900">
               <th class="py-2.5 px-3">Combinación</th>
               <th class="py-2.5 px-3 text-red-400">Paso 1 (15 µF) [D4]</th>
               <th class="py-2.5 px-3 text-blue-400">Paso 2 (30 µF) [D5]</th>
               <th class="py-2.5 px-3 text-emerald-400">Paso 3 (60 µF) [D6]</th>
-              <th class="py-2.5 px-3">C<sub>Total</sub> (µF)</th>
-              <th class="py-2.5 px-3">Q<sub>C</sub> Inyectada (VAR)</th>
+              <th class="py-2.5 px-3">C<sub>Total</sub></th>
+              <th class="py-2.5 px-3">Q<sub>C</sub> Inyectada</th>
               <th class="py-2.5 px-3">FP Estimado (Carga Actual)</th>
               <th class="py-2.5 px-3 text-center">Estado</th>
               <th class="py-2.5 px-3 text-right">Acción Manual</th>
             </tr>
           </thead>
-          <tbody id="truthTableBody" class="divide-y divide-slate-800/60 text-slate-300">
-            <!-- Will be populated dynamically via JavaScript -->
+          <tbody id="truthTableBody" class="divide-y divide-scada-700/60 text-slate-300">
+            <!-- Dynamically populated via app.js -->
           </tbody>
         </table>
       </div>
     </section>
 
-    <!-- ========================================================================
-         5. PANEL DE MEMORIA DE CÁLCULO EN VIVO (FÓRMULAS DE LA RÚBRICA)
-         ======================================================================== -->
-    <section class="glass-panel p-5 sm:p-6 rounded-2xl border-slate-700/80 shadow-2xl">
-      <div class="pb-4 border-b border-slate-800">
-        <h2 class="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-          <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-          </svg>
-          Memoria de Cálculo Matemático en Tiempo Real (Fórmulas de la Rúbrica)
-        </h2>
-        <p class="text-xs text-slate-400 mt-0.5">
-          Demostración paso a paso de la integración discreta, cálculo de potencia reactiva con signo mediante retardo N/4 y dimensionamiento óptimo de capacitancia.
-        </p>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 pt-5 text-xs font-mono">
-        
-        <!-- Bloque 1: Muestreo Discreto y FP Verdadero -->
-        <div class="glass-panel-subtle p-4 rounded-xl border border-slate-800 space-y-3">
-          <div class="flex items-center justify-between border-b border-slate-800/80 pb-2">
-            <span class="text-sky-400 font-bold font-sans">1. Muestreo Discreto (FP Verdadero)</span>
-            <span class="text-[10px] text-slate-500">N = 320 muestras</span>
-          </div>
-          
-          <div class="space-y-2 text-slate-300">
-            <div class="bg-slate-900/80 p-2 rounded border border-slate-800/70">
-              <span class="text-slate-400 block text-[10px]">Tensión Eficaz V<sub>rms</sub>:</span>
-              <p class="text-yellow-400 font-semibold">V<sub>rms</sub> = √( (1/N) ∑ v<sub>k</sub>² )</p>
-              <p id="calcVrmsStep" class="text-slate-400 text-[11px] mt-0.5">= √(14397.6) = 119.99 V</p>
-            </div>
-
-            <div class="bg-slate-900/80 p-2 rounded border border-slate-800/70">
-              <span class="text-slate-400 block text-[10px]">Corriente Eficaz I<sub>rms</sub>:</span>
-              <p class="text-cyan-400 font-semibold">I<sub>rms</sub> = √( (1/N) ∑ i<sub>k</sub>² )</p>
-              <p id="calcIrmsStep" class="text-slate-400 text-[11px] mt-0.5">= √(25.8) = 5.08 A</p>
-            </div>
-
-            <div class="bg-slate-900/80 p-2 rounded border border-slate-800/70">
-              <span class="text-slate-400 block text-[10px]">Potencias P, S y Factor de Potencia:</span>
-              <p class="text-slate-300">P = (1/N) ∑ (v<sub>k</sub> · i<sub>k</sub>) = <strong id="calcPVal" class="text-white">588.0 W</strong></p>
-              <p class="text-slate-300">S = V<sub>rms</sub> · I<sub>rms</sub> = <strong id="calcSVal" class="text-white">609.5 VA</strong></p>
-              <p class="text-emerald-400 font-bold mt-1">FP = P / S = <span id="calcFPVal">0.965</span></p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Bloque 2: Reactiva con Signo & Desfase -->
-        <div class="glass-panel-subtle p-4 rounded-xl border border-slate-800 space-y-3">
-          <div class="flex items-center justify-between border-b border-slate-800/80 pb-2">
-            <span class="text-amber-400 font-bold font-sans">2. Potencia Reactiva con Signo (N/4)</span>
-            <span class="text-[10px] text-slate-500">Retardo 90° = 8 m</span>
-          </div>
-
-          <div class="space-y-2 text-slate-300">
-            <div class="bg-slate-900/80 p-2 rounded border border-slate-800/70">
-              <span class="text-slate-400 block text-[10px]">Ecuación de Retardo en Cuadratura:</span>
-              <p class="text-amber-300 font-semibold">Q = (1/N) ∑ (v<sub>k-8</sub> · i<sub>k</sub>)</p>
-              <p class="text-[10px] text-slate-400 mt-1">
-                Al desfasar la tensión 90°, el producto con i(t) entrega la componente ortogonal con signo exacto.
-              </p>
-              <div class="mt-2 flex items-center justify-between">
-                <span>Q Medido:</span>
-                <span id="calcQSignBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  +144.0 VAR (ATRASO)
-                </span>
-              </div>
-            </div>
-
-            <div class="bg-slate-900/80 p-2 rounded border border-slate-800/70">
-              <span class="text-slate-400 block text-[10px]">Ángulo de Desfase φ y Tiempo Δt:</span>
-              <p class="text-slate-200">φ = arccos(FP) = <strong id="calcPhiVal" class="text-white">15.2°</strong></p>
-              <p class="text-slate-200">Δt = φ / (360° · 60 Hz) = <strong id="calcDtVal" class="text-white">0.70 ms</strong></p>
-              <p class="text-[10px] text-slate-500 mt-0.5">Retraso físico entre picos de V e I.</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Bloque 3: Dimensionamiento de Capacitancia & Error -->
-        <div class="glass-panel-subtle p-4 rounded-xl border border-slate-800 space-y-3">
-          <div class="flex items-center justify-between border-b border-slate-800/80 pb-2">
-            <span class="text-emerald-400 font-bold font-sans">3. Meta FP = 0.97 y Error Experimental</span>
-            <span class="text-[10px] text-slate-500">tan(φ₂) = 0.2506</span>
-          </div>
-
-          <div class="space-y-2 text-slate-300">
-            <div class="bg-slate-900/80 p-2 rounded border border-slate-800/70">
-              <span class="text-slate-400 block text-[10px]">Reactiva Requerida Q<sub>C,req</sub>:</span>
-              <p class="text-emerald-300 font-semibold">Q<sub>C</sub> = P · (tan φ₁ − tan φ₂)</p>
-              <p id="calcQcReqStep" class="text-slate-300 text-[11px] mt-0.5">Q<sub>C</sub> = 588.0 · (1.265 - 0.251) = <strong>596.2 VAR</strong></p>
-              <div class="mt-1 pt-1 border-t border-slate-800 text-[11px]">
-                <span>C<sub>req</sub> = Q<sub>C</sub> / (ω · V<sub>rms</sub>²) = </span>
-                <strong id="calcCReqVal" class="text-sky-400">109.8 µF</strong>
-              </div>
-            </div>
-
-            <div class="bg-slate-900/80 p-2 rounded border border-slate-800/70">
-              <span class="text-slate-400 block text-[10px]">Validación de Error Experimental (%):</span>
-              <p class="text-slate-300 text-[11px]">Error = ( |FP<sub>med</sub> − FP<sub>teo</sub>| / FP<sub>teo</sub> ) × 100%</p>
-              <div class="flex items-center justify-between mt-1.5">
-                <span class="text-slate-400">FP Teórico Modelo: <strong id="valFPTeo" class="text-slate-200">0.970</strong></span>
-                <span id="badgeErrorPct" class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                  Error: 0.52% (Excelente)
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </section>
-
-    <!-- ========================================================================
-         6. TELEMETRY LOGS & TERMINAL MONITOR
-         ======================================================================== -->
-    <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+    <!-- 2. Live Math Memo (Rubric Formulas Resolved Step-by-Step) -->
+    <section class="grid grid-cols-1 md:grid-cols-3 gap-5">
       
-      <!-- Telemetry Data Table (Recent Samples) -->
-      <div class="lg:col-span-7 glass-panel p-5 rounded-2xl flex flex-col justify-between">
-        <div class="flex items-center justify-between pb-3 border-b border-slate-800">
-          <div>
-            <h3 class="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-              <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              Registro Histórico de Telemetría (Buffer Circular)
-            </h3>
-            <p class="text-xs text-slate-400">Últimas lecturas adquiridas cada 500 ms (listas para exportar a CSV).</p>
+      <!-- Card A: Muestreo Discreto (True RMS) -->
+      <div class="scada-card p-4 space-y-3">
+        <div class="pb-2 border-b border-scada-700">
+          <span class="text-xs font-bold text-cyan-400 font-sans block">A. Muestreo Discreto (True RMS)</span>
+          <span class="text-[10px] text-slate-500 font-mono">N = 320 muestras (10 ciclos a 60 Hz)</span>
+        </div>
+        
+        <div class="space-y-2 text-xs font-mono text-slate-300">
+          <div class="bg-scada-900 p-2 rounded border border-scada-700">
+            <span class="text-[10px] text-slate-400 block">Tensión Eficaz V<sub>rms</sub>:</span>
+            <p class="text-yellow-400 font-semibold">V<sub>rms</sub> = √( (1/N) ∑ v<sub>k</sub>² )</p>
+            <p id="mathMemoVrms" class="text-slate-400 text-[11px] mt-0.5">= 120.00 V</p>
           </div>
-          <span id="recordCountBadge" class="text-xs font-mono bg-slate-800 px-2.5 py-1 rounded border border-slate-700 text-slate-300">0 registros</span>
-        </div>
 
-        <div class="overflow-x-auto my-3 max-h-56">
-          <table class="w-full text-left text-[11px] font-mono border-collapse">
-            <thead class="sticky top-0 bg-slate-900 border-b border-slate-800 text-slate-400">
-              <tr>
-                <th class="py-1.5 px-2">Hora</th>
-                <th class="py-1.5 px-2">V<sub>rms</sub> (V)</th>
-                <th class="py-1.5 px-2">I<sub>rms</sub> (A)</th>
-                <th class="py-1.5 px-2">P (W)</th>
-                <th class="py-1.5 px-2">Q (VAR)</th>
-                <th class="py-1.5 px-2">FP</th>
-                <th class="py-1.5 px-2">C (µF)</th>
-                <th class="py-1.5 px-2">LEDs [R,A,V]</th>
-              </tr>
-            </thead>
-            <tbody id="telemetryTableBody" class="divide-y divide-slate-800/40 text-slate-300">
-              <!-- Dynamically filled with data -->
-            </tbody>
-          </table>
-        </div>
+          <div class="bg-scada-900 p-2 rounded border border-scada-700">
+            <span class="text-[10px] text-slate-400 block">Corriente Eficaz I<sub>rms</sub>:</span>
+            <p class="text-cyan-400 font-semibold">I<sub>rms</sub> = √( (1/N) ∑ i<sub>k</sub>² )</p>
+            <p id="mathMemoIrms" class="text-slate-400 text-[11px] mt-0.5">= 1.11 A</p>
+          </div>
 
-        <div class="flex items-center justify-between text-xs text-slate-400 border-t border-slate-800 pt-2">
-          <span>Actualización automática: 500 ms</span>
-          <button id="btnClearTelemetry" class="text-[11px] text-slate-400 hover:text-slate-200 underline">
-            Limpiar Buffer
-          </button>
+          <div class="bg-scada-900 p-2 rounded border border-scada-700">
+            <span class="text-[10px] text-slate-400 block">Potencias P, S y Factor de Potencia:</span>
+            <p>P = (1/N) ∑ (v<sub>k</sub> · i<sub>k</sub>) = <strong id="mathMemoP" class="text-white">130.0 W</strong></p>
+            <p>S = V<sub>rms</sub> · I<sub>rms</sub> = <strong id="mathMemoS" class="text-white">133.4 VA</strong></p>
+            <p class="text-emerald-400 font-bold mt-1">FP = P / S = <span id="mathMemoFP">0.974</span></p>
+          </div>
         </div>
       </div>
 
-      <!-- Serial Terminal (PuTTY / Arduino IDE Style) -->
-      <div class="lg:col-span-5 glass-panel p-5 rounded-2xl flex flex-col justify-between">
-        <div class="flex items-center justify-between pb-3 border-b border-slate-800">
-          <div>
-            <h3 class="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-              <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              Consola Serie (115200 Baud · 8N1)
-            </h3>
-            <p class="text-xs text-slate-400">Tramas crudas JSON y respuestas del ATmega328P.</p>
-          </div>
-          <button id="btnClearTerminal" class="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 hover:bg-slate-700 transition">
-            Limpiar
-          </button>
+      <!-- Card B: Potencia Reactiva con Signo (Retardo N/4 = 8 muestras) -->
+      <div class="scada-card p-4 space-y-3">
+        <div class="pb-2 border-b border-scada-700">
+          <span class="text-xs font-bold text-amber-400 font-sans block">B. Reactiva con Signo (N/4 = 8)</span>
+          <span class="text-[10px] text-slate-500 font-mono">Retardo 90° en cuadratura para 60 Hz</span>
         </div>
 
-        <!-- Terminal Output Window -->
-        <div id="terminalOutput" class="terminal-output my-3 p-3 rounded-lg h-56 overflow-y-auto whitespace-pre-wrap select-text"></div>
+        <div class="space-y-2 text-xs font-mono text-slate-300">
+          <div class="bg-scada-900 p-2 rounded border border-scada-700">
+            <span class="text-[10px] text-slate-400 block">Fórmula Discreta con Retardo N/4:</span>
+            <p class="text-amber-300 font-semibold">Q = (1/N) ∑ (v<sub>k-8</sub> · i<sub>k</sub>)</p>
+            <p class="text-[10px] text-slate-400 mt-1">
+              Desfasando v(t) 90°, el producto con i(t) entrega la reactiva conservando el signo (+ Inductivo / - Capacitivo).
+            </p>
+            <div class="mt-2 flex items-center justify-between">
+              <span>Q Neta Medida:</span>
+              <strong id="mathMemoQ" class="text-emerald-400">+30.0 VAR</strong>
+            </div>
+          </div>
 
-        <!-- Terminal Input & Quick Keys -->
-        <div class="flex items-center gap-2 border-t border-slate-800 pt-2">
-          <input id="termInput" type="text" placeholder="Escribe comando (t, 1, 2, 3, 0, c, j) y presiona Enter..." class="flex-1 bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-sky-500">
-          <button id="termSendBtn" class="px-3 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-mono transition">
-            Enviar
-          </button>
+          <div class="bg-scada-900 p-2 rounded border border-scada-700">
+            <span class="text-[10px] text-slate-400 block">Ángulo φ y Cruce por Cero Δt:</span>
+            <p>φ = arccos(FP) = <strong id="mathMemoPhi" class="text-white">13.0°</strong></p>
+            <p>Δt = φ / (360° · 60 Hz) = <strong id="mathMemoDt" class="text-white">0.60 ms</strong></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card C: Dimensionamiento de Capacitancia & Error Experimental -->
+      <div class="scada-card p-4 space-y-3">
+        <div class="pb-2 border-b border-scada-700">
+          <span class="text-xs font-bold text-emerald-400 font-sans block">C. Dimensionamiento & Error</span>
+          <span class="text-[10px] text-slate-500 font-mono">Meta FP = 0.97 (tan φ₂ = 0.2506)</span>
+        </div>
+
+        <div class="space-y-2 text-xs font-mono text-slate-300">
+          <div class="bg-scada-900 p-2 rounded border border-scada-700">
+            <span class="text-[10px] text-slate-400 block">Potencia Reactiva Requerida:</span>
+            <p class="text-emerald-300 font-semibold">Q<sub>C</sub> = P · (tan φ₁ − tan φ₂)</p>
+            <p id="mathMemoQcReq" class="text-[11px] text-slate-300 mt-0.5">Q<sub>C</sub> = 567.4 VAR</p>
+            <div class="mt-1 pt-1 border-t border-scada-700/60 text-[11px]">
+              <span>C<sub>req</sub> = Q<sub>C</sub> / (ω · V<sub>rms</sub>²) = </span>
+              <strong id="mathMemoCReq" class="text-cyan-400">104.5 µF</strong>
+            </div>
+          </div>
+
+          <div class="bg-scada-900 p-2 rounded border border-scada-700">
+            <span class="text-[10px] text-slate-400 block">Validación de Error Experimental (%):</span>
+            <p class="text-[11px]">Error = ( |FP<sub>med</sub> − FP<sub>teo</sub>| / FP<sub>teo</sub> ) × 100%</p>
+            <div class="flex items-center justify-between mt-1.5">
+              <span>FP Teórico: <strong id="mathMemoFPTeo" class="text-slate-200">0.974</strong></span>
+              <span id="mathMemoErrorBadge" class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                Error: 0.12%
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -857,87 +740,170 @@
   </main>
 
   <!-- ========================================================================
-       FOOTER
+       TAB 3: HISTORIAL Y DIAGNÓSTICO (SERIAL TERMINAL & CSV LOGGER)
        ======================================================================== -->
-  <footer class="border-t border-slate-800/80 bg-industrial-900/60 py-4 px-4 sm:px-6 lg:px-8 mt-12 text-xs text-slate-500">
-    <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
-      <div>
-        <strong class="text-slate-400">POWERGuard 5</strong> — Proyecto de Compensación Automática de Reactivos y FP Verdadero.
-        <span class="block text-[11px] text-slate-600 mt-0.5">Instituto Kriete de Ingeniería y Ciencias · Circuitos Eléctricos</span>
+  <main id="tabHistory" class="tab-content max-w-7xl mx-auto px-4 sm:px-6 py-4 space-y-6 flex-1 w-full">
+    
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      
+      <!-- Telemetry Circular Buffer Table -->
+      <div class="lg:col-span-7 scada-card p-5 flex flex-col justify-between">
+        <div class="flex items-center justify-between pb-3 border-b border-scada-700">
+          <div>
+            <h3 class="text-sm font-bold text-white font-sans flex items-center gap-2">
+              <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Registro Histórico de Telemetría (Buffer Circular)
+            </h3>
+            <p class="text-xs text-slate-400">Lecturas adquiridas cada 500 ms (identificadas como SIMULADAS o ARDUINO NANO).</p>
+          </div>
+          <span id="recordCountBadge" class="text-xs font-mono bg-scada-900 px-2.5 py-1 rounded border border-scada-700 text-slate-300">0 registros</span>
+        </div>
+
+        <div class="overflow-x-auto my-3 max-h-80">
+          <table class="w-full text-left text-[11px] font-mono border-collapse">
+            <thead class="sticky top-0 bg-scada-900 border-b border-scada-700 text-slate-400">
+              <tr>
+                <th class="py-1.5 px-2">Hora</th>
+                <th class="py-1.5 px-2">Origen</th>
+                <th class="py-1.5 px-2">V<sub>rms</sub> (V)</th>
+                <th class="py-1.5 px-2">I<sub>rms</sub> (A)</th>
+                <th class="py-1.5 px-2">P (W)</th>
+                <th class="py-1.5 px-2">Q (VAR)</th>
+                <th class="py-1.5 px-2">FP</th>
+                <th class="py-1.5 px-2">C (µF)</th>
+                <th class="py-1.5 px-2">LEDs</th>
+              </tr>
+            </thead>
+            <tbody id="telemetryTableBody" class="divide-y divide-scada-700/50 text-slate-300">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+
+        <div class="flex items-center justify-between text-xs text-slate-400 border-t border-scada-700 pt-2">
+          <span>Buffer máx: 100 lecturas</span>
+          <div class="flex items-center gap-3">
+            <button id="btnClearTelemetry" class="text-[11px] text-slate-400 hover:text-white underline">
+              Limpiar Buffer
+            </button>
+            <button id="btnExportCSVTab" class="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs transition">
+              Descargar Archivo CSV
+            </button>
+          </div>
+        </div>
       </div>
-      <div class="text-[11px] text-slate-500">
-        Diana Carballo • Emma Palacios • Eduardo Figueroa • Juan Pablo Ramírez
+
+      <!-- Professional Industrial Serial Terminal -->
+      <div class="lg:col-span-5 scada-card p-5 flex flex-col justify-between">
+        <div class="flex items-center justify-between pb-3 border-b border-scada-700">
+          <div>
+            <h3 class="text-sm font-bold text-white font-sans flex items-center gap-2">
+              <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              Consola Serie (115200 Baud · 8N1)
+            </h3>
+            <p class="text-xs text-slate-400">Tramas JSON bidireccionales con Arduino Nano.</p>
+          </div>
+          <button id="btnClearTerminal" class="text-[11px] px-2 py-0.5 rounded bg-scada-850 text-slate-300 hover:bg-scada-800 border border-scada-700 transition">
+            Limpiar
+          </button>
+        </div>
+
+        <div id="terminalOutput" class="scada-terminal my-3 p-3 h-80 overflow-y-auto whitespace-pre-wrap select-text"></div>
+
+        <div class="flex items-center gap-2 border-t border-scada-700 pt-2">
+          <input id="termInput" type="text" placeholder="Escribe comando (t, 1, 2, 3, 0, c, j) y Enter..." class="flex-1 bg-scada-900 border border-scada-700 rounded px-2.5 py-1 text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500">
+          <button id="termSendBtn" class="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-black font-semibold rounded text-xs font-mono transition">
+            Enviar
+          </button>
+        </div>
       </div>
+
     </div>
-  </footer>
+
+  </main>
 
   <!-- ========================================================================
-       MODAL: FICHA TÉCNICA Y ESPECIFICACIONES DE HARDWARE
+       SLIDE-OVER ALARM DRAWER (SISTEMA CENTRALIZADO DE ALARMAS INTELIGENTES)
+       ======================================================================== -->
+  <div id="alarmBackdrop" class="alarm-backdrop"></div>
+  <aside id="alarmDrawer" class="alarm-drawer">
+    <div class="p-4 border-b border-scada-700 flex items-center justify-between">
+      <div class="flex items-center space-x-2">
+        <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+        </svg>
+        <h3 class="text-sm font-bold text-white font-sans">Panel de Alarmas & Diagnóstico</h3>
+      </div>
+      <button id="btnCloseAlarms" class="text-slate-400 hover:text-white p-1 rounded-md hover:bg-scada-800 transition">
+        ✕
+      </button>
+    </div>
+
+    <!-- Active Alarms Filter Tabs -->
+    <div class="p-3 bg-scada-900 border-b border-scada-700 flex items-center justify-between text-xs">
+      <span class="text-slate-400 font-mono">Supervisión en Tiempo Real</span>
+      <button id="btnAckAllAlarms" class="px-2 py-0.5 rounded bg-scada-800 hover:bg-scada-700 text-slate-200 border border-scada-700 text-[11px] transition">
+        Reconocer Todo
+      </button>
+    </div>
+
+    <!-- Alarm Event Feed Container -->
+    <div id="alarmFeedContainer" class="flex-1 overflow-y-auto p-4 space-y-3">
+      <!-- Dynamically filled with alarms -->
+    </div>
+
+    <div class="p-3 border-t border-scada-700 bg-scada-900 text-[11px] text-slate-500 flex items-center justify-between font-mono">
+      <span>Auto-diagnóstico: Activo</span>
+      <span class="text-emerald-400">Protección RC 30s OK</span>
+    </div>
+  </aside>
+
+  <!-- ========================================================================
+       MODAL: FICHA TÉCNICA Y ESQUEMA DE HARDWARE
        ======================================================================== -->
   <div id="modalDocs" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden items-center justify-center p-4">
-    <div class="glass-panel max-w-3xl w-full max-h-[85vh] overflow-y-auto rounded-2xl p-6 border-slate-700 shadow-2xl space-y-4">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-        <h3 class="text-lg font-bold text-white flex items-center gap-2">
-          <svg class="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div class="scada-card max-w-2xl w-full max-h-[85vh] overflow-y-auto p-6 space-y-4">
+      <div class="flex items-center justify-between border-b border-scada-700 pb-3">
+        <h3 class="text-base font-bold text-white flex items-center gap-2">
+          <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
           </svg>
           Ficha Técnica & Arquitectura de Hardware — POWERGuard 5
         </h3>
-        <button id="btnCloseDocs" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-          </svg>
-        </button>
+        <button id="btnCloseDocs" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-scada-800 transition">✕</button>
       </div>
 
-      <div class="text-xs text-slate-300 space-y-4 leading-relaxed font-sans">
-        <!-- Equipo y Carga -->
-        <div class="bg-slate-900/80 p-4 rounded-xl border border-slate-800 space-y-2">
-          <h4 class="font-bold text-sky-400 text-sm">1. Características de la Carga Principal (Condición de Banco de Laboratorio)</h4>
-          <ul class="list-disc list-inside space-y-1 text-slate-300">
-            <li><strong>Motor:</strong> WEG W01 Monofásico de Inducción (Rotor Jaula de Ardilla).</li>
-            <li><strong>Potencia:</strong> 0.5 HP (0.37 kW) · 4 polos · 1735 RPM · 60 Hz · 115/120 VAC.</li>
-            <li><strong>Operación Real en Banco:</strong> En vacío permanente (sin acoplamiento mecánico).</li>
-            <li><strong>Factor de Potencia sin Compensar:</strong> FP máximo alcanzado de <strong>0.18 a 0.20</strong> (P ≈ 130 W, Q ≈ 640 VAR, S ≈ 653 VA, corriente base ~5.44 A).</li>
-            <li><strong>Pico de Corriente de Arranque (Inrush):</strong> Alcanza transitorios de <strong>10 A a 15 A</strong> durante el arranque y aceleración magnética.</li>
-          </ul>
+      <div class="text-xs text-slate-300 space-y-3 leading-relaxed font-sans">
+        <div class="bg-scada-900 p-3 rounded-lg border border-scada-700 space-y-1">
+          <strong class="text-cyan-400 block font-bold">1. Carga Principal (Banco de Laboratorio)</strong>
+          <p>• Motor WEG W01 Monofásico de Inducción (0.5 HP / 0.37 kW · 115V AC · 60 Hz · 1735 RPM · 4 polos).</p>
+          <p>• <strong>Condición Real:</strong> Operación en VACÍO CONTINUO. FP sin compensar $\approx 0.212$ ($P = 130\text{ W}$, $Q = 600\text{ VAR}$).</p>
+          <p>• Picos de arranque transitorios (Inrush): 10 A a 15 A registrados por el sensor Hall ACS712-30A sin saturación.</p>
         </div>
 
-        <!-- Adquisición de Señal -->
-        <div class="bg-slate-900/80 p-4 rounded-xl border border-slate-800 space-y-2">
-          <h4 class="font-bold text-amber-400 text-sm">2. Etapa de Adquisición y Aislamiento Galvánico</h4>
-          <ul class="list-disc list-inside space-y-1 text-slate-300">
-            <li><strong>Canal A0 (Tensión):</strong> Transformador reductor T1 (120/12 VAC) + divisor resistivo 100 kΩ / 10 kΩ montado sobre referencia virtual de 2.5 V (VB) para evitar voltajes negativos en el ADC. Factor de escala: 110.0.</li>
-            <li><strong>Canal A1 (Corriente):</strong> Sensor de efecto Hall <strong>ACS712-30A</strong> (sensibilidad 66 mV/A, aislamiento galvánico de 2.1 kVrms) con offset en 2.5 V. Gracias a su rango de ±30 A, registra con total linealidad los picos de arranque de 10-15 A sin saturación del canal analógico. Factor de escala: 15.15 A/V.</li>
-            <li><strong>Muestreo:</strong> 32 muestras por ciclo a 60 Hz (fs = 1920 Hz, T = 520.8 µs). Ventana de análisis de 10 ciclos (320 muestras).</li>
-          </ul>
-        </div>
-
-        <!-- Etapa de Potencia -->
-        <div class="bg-slate-900/80 p-4 rounded-xl border border-slate-800 space-y-2">
-          <h4 class="font-bold text-emerald-400 text-sm">3. Banco de Capacitores y Etapa de Disparo</h4>
-          <ul class="list-disc list-inside space-y-1 text-slate-300">
-            <li><strong>Arquitectura 1:2:4:</strong> Permite 8 combinaciones (0 a 105 µF en pasos discretos de 15 µF):
-              <br>• C1 = 15 µF (81.4 VAR) · D4 (LED Rojo)
-              <br>• C2 = 30 µF (162.9 VAR) · D5 (LED Azul)
-              <br>• C3 = 60 µF (325.7 VAR) · D6 (LED Verde)
-            </li>
-            <li><strong>Aislamiento y Conmutación:</strong> Optoacopladores MOC3063 con detección interna de cruce por cero (Zero-Cross) + TRIACs de potencia BTA16-600CW (16 A, 600 V) para garantizar conexión suave sin picos de corriente di/dt destructivos.</li>
-            <li><strong>Protección de Descarga:</strong> Cada rama dispone de una resistencia de descarga en paralelo de 100 kΩ / 2W. El firmware y dashboard implementan un bloqueo de seguridad de 30 segundos (5τ para 60 µF) antes de permitir la reconexión de cualquier paso.</li>
-          </ul>
+        <div class="bg-scada-900 p-3 rounded-lg border border-scada-700 space-y-1">
+          <strong class="text-amber-400 block font-bold">2. Banco de Capacitores 1:2:4</strong>
+          <p>• Paso 1 (D4): 15 µF (81.4 VAR · Ajuste Fino)</p>
+          <p>• Paso 2 (D5): 30 µF (162.9 VAR · Escalón Medio)</p>
+          <p>• Paso 3 (D6): 60 µF (325.7 VAR · Carga Base)</p>
+          <p>• Total: 105 µF (Inyecta 570 VAR a 120V). Eleva el FP de 0.212 hasta <strong>0.974</strong> en vacío, reduciendo la corriente de 5.12 A a 1.11 A (-78.3%).</p>
+          <p>• Conmutación: Optotriacs con cruce por cero MOC3063 + TRIACs BTA16-600CW con NTC 5D-9 y bloqueo de descarga RC de 30 s.</p>
         </div>
       </div>
 
-      <div class="flex justify-end pt-2 border-t border-slate-800">
-        <button id="btnModalCloseAction" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold transition">
+      <div class="flex justify-end pt-2 border-t border-scada-700">
+        <button id="btnModalCloseAction" class="px-4 py-1.5 bg-scada-850 hover:bg-scada-800 text-white rounded text-xs font-semibold transition border border-scada-700">
           Cerrar Ficha
         </button>
       </div>
     </div>
   </div>
 
-  <!-- Main JavaScript Application Logic -->
+  <!-- Main SCADA Script -->
   <script src="app.js"></script>
 </body>
 </html>
-

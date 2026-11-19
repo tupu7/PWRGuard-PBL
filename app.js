@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * POWERGuard 5 — Dashboard de Telemetría y Control de Factor de Potencia
+ * POWERGuard 5 — SCADA Industrial Telemetry & Control Engine
  * Instituto Kriete de Ingeniería y Ciencias · Circuitos Eléctricos
  * Equipo: Diana Carballo, Emma Palacios, Eduardo Figueroa, Juan Pablo Ramírez
  * Microcontrolador: Arduino Nano (ATmega328P, 5V, ADC 10 bits)
@@ -10,72 +10,77 @@
 (() => {
   'use strict';
 
-  // --- CONSTANTES DEL SISTEMA Y HARDWARE ---
+  // --- CONSTANTES DEL SISTEMA Y HARDWARE ELÉCTRICO ---
   const FREQ_RED = 60.0;
-  const OMEGA = 2.0 * Math.PI * FREQ_RED; // 376.9911 rad/s
+  const OMEGA = 2.0 * Math.PI * FREQ_RED; // 376.991118 rad/s
   const LOCK_TIME_MS = 30000; // 30 segundos de descarga de seguridad (5 tau para 60uF con R=100k)
-  const TAU_RC = [1.5, 3.0, 6.0]; // Tau para 15uF, 30uF y 60uF con R=100kΩ (s)
+  const TAU_RC = [1.5, 3.0, 6.0]; // Tau para 15uF, 30uF y 60uF con R=100kΩ
   const STEP_UF = [15.0, 30.0, 60.0];
-  const STEP_VAR_120V = [81.43, 162.86, 325.72]; // Inyección nominal a 120V
 
-  // Carga base del Motor de Inducción WEG W01 (0.5 HP, 115/120V, 60Hz, 8.24A nom)
-  // CONDICIÓN EXPERIMENTAL: Motor siempre en vacío con FP máx sin compensar ≈ 0.20
-  // y picos de corriente transitorios de arranque entre 10 y 15 A.
+  // PARÁMETROS FÍSICOS RIGUROSOS DEL MOTOR WEG W01 (0.5 HP / 0.37 kW)
+  // En Vacío: P = 130 W, Q = 600 VAR -> FP_uncomp = 0.212 | Con 105 uF (Qc=570 VAR): Qnet = 30 VAR -> FP_comp = 0.974
+  // Carga Media: P = 350 W, Q = 650 VAR -> FP_uncomp = 0.474 | Con 105 uF (Qc=570 VAR): Qnet = 80 VAR -> FP_comp = 0.975
+  // Plena Carga: P = 588 W, Q = 744 VAR -> FP_uncomp = 0.620 | Con 105 uF (Qc=570 VAR): Qnet = 174 VAR -> FP_comp = 0.959
   const MOTOR_PRESETS = {
-    empty: { p: 130.0, q: 640.0, v: 120.0, label: 'En Vacío (Lab Real: FP ≈ 0.20 · 130W / 640 VAR)' },
-    mid:   { p: 350.0, q: 650.0, v: 120.0, label: 'Carga Media Teórica (350W / 650 VAR · FP 0.47)' },
-    full:  { p: 588.0, q: 744.0, v: 120.0, label: 'Plena Carga Teórica (588W / 744 VAR · FP 0.62)' },
-    off:   { p: 0.0,   q: 0.0,   v: 120.0, label: 'Motor Apagado (0W / 0 VAR)' }
+    empty: { p: 130.0, q: 600.0, v: 120.0, label: 'En Vacío (Lab Real: FP ≈ 0.212 · 130 W / 600 VAR)' },
+    mid:   { p: 350.0, q: 650.0, v: 120.0, label: 'Carga Media (350 W / 650 VAR · FP ≈ 0.474)' },
+    full:  { p: 588.0, q: 744.0, v: 120.0, label: 'Plena Carga (588 W / 744 VAR · FP ≈ 0.620)' },
+    off:   { p: 0.0,   q: 0.0,   v: 120.0, label: 'Motor Apagado (0 W / 0 VAR)' }
   };
 
   // --- ESTADO GLOBAL DE LA APLICACIÓN ---
   const state = {
-    // Modo de operación: 'sim' (Simulación) o 'serial' (Hardware Real USB)
-    mode: 'sim',
+    mode: 'sim', // 'sim' o 'serial'
     isAutoControl: true,
-    motorPresetKey: 'empty', // Por defecto: la condición real de laboratorio en vacío
+    motorPresetKey: 'empty', // Condición real de prueba en vacío
+    presentationMode: false,
 
-    // Parámetros de la simulación
+    // Carga de simulación activa
     simMotor: { ...MOTOR_PRESETS.empty },
-    
-    // Simulación de transitorio de arranque (Pico 10 - 15 A)
-    peakCurrentRecorded: 13.8, // Valor máximo registrado (Max-Hold)
+
+    // Transitorio de arranque (pico 10 - 15 A)
+    peakCurrentRecorded: 13.8,
     inrushMultiplier: 1.0,
     inrushDecayTimer: null,
 
-    // Estado de los 3 pasos de capacitores [Paso 1 (15uF), Paso 2 (30uF), Paso 3 (60uF)]
-    stepState: [false, false, false],
-    lastOffTime: [0, 0, 0], // Timestamp de cuando se apagó cada paso para el timer de 30s
+    // Estado físico del banco de capacitores [D4 (15uF), D5 (30uF), D6 (60uF)]
+    // Inicia con los capacitores conectados para alcanzar el FP óptimo en vacío de 0.974
+    stepState: [true, true, true],
+    lastOffTime: [0, 0, 0],
 
-    // Medidas instantáneas adquiridas (vía USB o calculadas en simulación)
+    // Telemetría instantánea (Fuente única de verdad física)
     telemetry: {
       vRms: 120.0,
-      iRms: 5.44,
+      iRms: 1.11,
       pAct: 130.0,
-      qRea: 640.0,
-      sApp: 653.1,
-      fp: 0.199,
-      phiDeg: 78.5,
-      deltaTMs: 3.63,
+      qRea: 30.0,
+      sApp: 133.4,
+      fp: 0.974,
+      phiDeg: 13.0,
+      deltaTMs: 0.60,
       isCapacitive: false,
-      qcReq: 574.0,
-      cReqUF: 105.7,
-      qInjected: 0.0,
-      cTotalUF: 0.0,
-      iReductionPct: 0.0,
-      fpTeorico: 0.199,
+      qcReq: 0.0,
+      cReqUF: 0.0,
+      qInjected: 570.0,
+      cTotalUF: 105.0,
+      iReductionPct: 78.3,
+      fpTeorico: 0.974,
       errorPct: 0.0
     },
 
-    // Temporizador de histéresis automática
+    // Lazo automático de histéresis
     lastAutoActionTime: 0,
-    autoActionDelayMs: 4500, // Tiempo mínimo entre maniobras automáticas
+    autoActionDelayMs: 4500,
 
-    // Buffer histórico para tabla y exportación CSV
+    // Sistema centralizado de alarmas
+    alarms: [],
+    alarmCounterId: 1,
+
+    // Registro histórico para tabla y CSV
     telemetryHistory: [],
     maxHistorySize: 100,
 
-    // Web Serial API handles
+    // Manejador Web Serial
     serial: {
       port: null,
       reader: null,
@@ -85,19 +90,24 @@
       buffer: ''
     },
 
-    // Estado del osciloscopio
+    // Osciloscopio
     scope: {
       paused: false,
-      timebaseMsDiv: 2.0, // ms por división
-      vScale: 40.0, // Voltios por división
-      iScale: 2.0,  // Amperios por división
+      timebaseMsDiv: 2.0,
       timeSec: 0
     }
   };
 
   // --- REFERENCIAS A ELEMENTOS DEL DOM ---
   const dom = {
-    // Header & Modes
+    // Header & Tabs
+    tabBtnMonitor: document.getElementById('tabBtnMonitor'),
+    tabBtnEngineering: document.getElementById('tabBtnEngineering'),
+    tabBtnHistory: document.getElementById('tabBtnHistory'),
+    tabMonitor: document.getElementById('tabMonitor'),
+    tabEngineering: document.getElementById('tabEngineering'),
+    tabHistory: document.getElementById('tabHistory'),
+
     modeBadge: document.getElementById('modeBadge'),
     modeText: document.getElementById('modeText'),
     toggleAutoBtn: document.getElementById('toggleAutoBtn'),
@@ -105,166 +115,198 @@
     autoBtnText: document.getElementById('autoBtnText'),
     btnConnectSerial: document.getElementById('btnConnectSerial'),
     serialBtnLabel: document.getElementById('serialBtnLabel'),
+    btnOpenAlarms: document.getElementById('btnOpenAlarms'),
+    alarmCountHeaderBadge: document.getElementById('alarmCountHeaderBadge'),
+    btnTogglePresentation: document.getElementById('btnTogglePresentation'),
+    btnOpenDocs: document.getElementById('btnOpenDocs'),
 
-    // Motor Presets & Inrush Simulator
+    // Motor Controls
     btnLoadEmpty: document.getElementById('btnLoadEmpty'),
     btnLoadMid: document.getElementById('btnLoadMid'),
     btnLoadFull: document.getElementById('btnLoadFull'),
     btnLoadOff: document.getElementById('btnLoadOff'),
     btnSimInrush: document.getElementById('btnSimInrush'),
-
-    // Quick Command Buttons
     btnSendTest: document.getElementById('btnSendTest'),
     btnSendCalib: document.getElementById('btnSendCalib'),
     btnSendOff: document.getElementById('btnSendOff'),
-    btnExportCSV: document.getElementById('btnExportCSV'),
 
-    // KPI Cards
+    // Motor Visual Card
+    cardMotorWeg: document.getElementById('cardMotorWeg'),
+    motorStatusDot: document.getElementById('motorStatusDot'),
+    badgeMotorState: document.getElementById('badgeMotorState'),
+    motorRunningIndicator: document.getElementById('motorRunningIndicator'),
+    motorLoadText: document.getElementById('motorLoadText'),
+    motorPText: document.getElementById('motorPText'),
+
+    // Protagonist FP Meter
+    fpGaugeCanvas: document.getElementById('fpGaugeCanvas'),
+    valFP: document.getElementById('valFP'),
+    valPhiDeg: document.getElementById('valPhiDeg'),
+    fpStatusBadge: document.getElementById('fpStatusBadge'),
+    valFpRegime: document.getElementById('valFpRegime'),
+    valDeltaT: document.getElementById('valDeltaT'),
+    fpConditionSummary: document.getElementById('fpConditionSummary'),
+
+    // Bank 1:2:4
+    badgeCapTotal: document.getElementById('badgeCapTotal'),
+    ledCore1: document.getElementById('ledCore1'),
+    ledCore2: document.getElementById('ledCore2'),
+    ledCore3: document.getElementById('ledCore3'),
+    ledStateText1: document.getElementById('ledStateText1'),
+    ledStateText2: document.getElementById('ledStateText2'),
+    ledStateText3: document.getElementById('ledStateText3'),
+    btnStepToggle1: document.getElementById('btnStepToggle1'),
+    btnStepToggle2: document.getElementById('btnStepToggle2'),
+    btnStepToggle3: document.getElementById('btnStepToggle3'),
+    lockStatusSummary: document.getElementById('lockStatusSummary'),
+    lockBarFill: document.getElementById('lockBarFill'),
+
+    // KPIs
     valVrms: document.getElementById('valVrms'),
     valIrms: document.getElementById('valIrms'),
+    valIReduction: document.getElementById('valIReduction'),
     valIPeak: document.getElementById('valIPeak'),
     btnResetPeak: document.getElementById('btnResetPeak'),
-    valIReduction: document.getElementById('valIReduction'),
     valP: document.getElementById('valP'),
     valPLoadPct: document.getElementById('valPLoadPct'),
     valQ: document.getElementById('valQ'),
     badgeQState: document.getElementById('badgeQState'),
-    valQInjected: document.getElementById('valQInjected'),
-    valS: document.getElementById('valS'),
-    valDeltaT: document.getElementById('valDeltaT'),
-    valFP: document.getElementById('valFP'),
-    valPhiDeg: document.getElementById('valPhiDeg'),
-    fpStatusBadge: document.getElementById('fpStatusBadge'),
-    fpGaugeProgress: document.getElementById('fpGaugeProgress'),
-    fpZoneLabel: document.getElementById('fpZoneLabel'),
+    valQMotorText: document.getElementById('valQMotorText'),
+    valQInjectedText: document.getElementById('valQInjectedText'),
 
-    // Bank Summary Badges
-    badgeCapTotal: document.getElementById('badgeCapTotal'),
-    badgeBinaryCode: document.getElementById('badgeBinaryCode'),
-
-    // 3 LEDs Hardware Panel
-    bezelLed1: document.getElementById('bezelLed1'),
-    coreLed1: document.getElementById('coreLed1'),
-    badgeStateLed1: document.getElementById('badgeStateLed1'),
-    lockTimerText1: document.getElementById('lockTimerText1'),
-    lockProgressBar1: document.getElementById('lockProgressBar1'),
-    btnToggleStep1: document.getElementById('btnToggleStep1'),
-
-    bezelLed2: document.getElementById('bezelLed2'),
-    coreLed2: document.getElementById('coreLed2'),
-    badgeStateLed2: document.getElementById('badgeStateLed2'),
-    lockTimerText2: document.getElementById('lockTimerText2'),
-    lockProgressBar2: document.getElementById('lockProgressBar2'),
-    btnToggleStep2: document.getElementById('btnToggleStep2'),
-
-    bezelLed3: document.getElementById('bezelLed3'),
-    coreLed3: document.getElementById('coreLed3'),
-    badgeStateLed3: document.getElementById('badgeStateLed3'),
-    lockTimerText3: document.getElementById('lockTimerText3'),
-    lockProgressBar3: document.getElementById('lockProgressBar3'),
-    btnToggleStep3: document.getElementById('btnToggleStep3'),
-
-    // Oscilloscope & Triangle
+    // Visualizations
     scopeCanvas: document.getElementById('scopeCanvas'),
     btnPauseScope: document.getElementById('btnPauseScope'),
     hudVpp: document.getElementById('hudVpp'),
     hudIpp: document.getElementById('hudIpp'),
-    hudPhi: document.getElementById('hudPhi'),
     hudDt: document.getElementById('hudDt'),
+    hudPhi: document.getElementById('hudPhi'),
     triangleCanvas: document.getElementById('triangleCanvas'),
     triS1: document.getElementById('triS1'),
-    triQL: document.getElementById('triQL'),
     triS2: document.getElementById('triS2'),
-    triQnet: document.getElementById('triQnet'),
-    triFP: document.getElementById('triFP'),
 
-    // Truth Table
+    // Bottom Bar
+    badgeCritCount: document.getElementById('badgeCritCount'),
+    badgeWarnCount: document.getElementById('badgeWarnCount'),
+    btnFooterOpenAlarms: document.getElementById('btnFooterOpenAlarms'),
+    btnQuickExportCSV: document.getElementById('btnQuickExportCSV'),
+
+    // Engineering Tab
     truthTableBody: document.getElementById('truthTableBody'),
+    mathMemoVrms: document.getElementById('mathMemoVrms'),
+    mathMemoIrms: document.getElementById('mathMemoIrms'),
+    mathMemoP: document.getElementById('mathMemoP'),
+    mathMemoS: document.getElementById('mathMemoS'),
+    mathMemoFP: document.getElementById('mathMemoFP'),
+    mathMemoQ: document.getElementById('mathMemoQ'),
+    mathMemoPhi: document.getElementById('mathMemoPhi'),
+    mathMemoDt: document.getElementById('mathMemoDt'),
+    mathMemoQcReq: document.getElementById('mathMemoQcReq'),
+    mathMemoCReq: document.getElementById('mathMemoCReq'),
+    mathMemoFPTeo: document.getElementById('mathMemoFPTeo'),
+    mathMemoErrorBadge: document.getElementById('mathMemoErrorBadge'),
 
-    // Math Formulas
-    calcVrmsStep: document.getElementById('calcVrmsStep'),
-    calcIrmsStep: document.getElementById('calcIrmsStep'),
-    calcPVal: document.getElementById('calcPVal'),
-    calcSVal: document.getElementById('calcSVal'),
-    calcFPVal: document.getElementById('calcFPVal'),
-    calcQSignBadge: document.getElementById('calcQSignBadge'),
-    calcPhiVal: document.getElementById('calcPhiVal'),
-    calcDtVal: document.getElementById('calcDtVal'),
-    calcQcReqStep: document.getElementById('calcQcReqStep'),
-    calcCReqVal: document.getElementById('calcCReqVal'),
-    valFPTeo: document.getElementById('valFPTeo'),
-    badgeErrorPct: document.getElementById('badgeErrorPct'),
-
-    // Telemetry Table & Serial Terminal
+    // History Tab
     telemetryTableBody: document.getElementById('telemetryTableBody'),
     recordCountBadge: document.getElementById('recordCountBadge'),
     btnClearTelemetry: document.getElementById('btnClearTelemetry'),
+    btnExportCSVTab: document.getElementById('btnExportCSVTab'),
     terminalOutput: document.getElementById('terminalOutput'),
     btnClearTerminal: document.getElementById('btnClearTerminal'),
     termInput: document.getElementById('termInput'),
     termSendBtn: document.getElementById('termSendBtn'),
 
-    // Modal
+    // Alarms Drawer
+    alarmDrawer: document.getElementById('alarmDrawer'),
+    alarmBackdrop: document.getElementById('alarmBackdrop'),
+    btnCloseAlarms: document.getElementById('btnCloseAlarms'),
+    btnAckAllAlarms: document.getElementById('btnAckAllAlarms'),
+    alarmFeedContainer: document.getElementById('alarmFeedContainer'),
+
+    // Docs Modal
     modalDocs: document.getElementById('modalDocs'),
-    btnOpenDocs: document.getElementById('btnOpenDocs'),
     btnCloseDocs: document.getElementById('btnCloseDocs'),
     btnModalCloseAction: document.getElementById('btnModalCloseAction')
   };
 
   // ==========================================================================
-  // CÁLCULOS MATEMÁTICOS DE INGENIERÍA ELÉCTRICA
+  // FUENTE ÚNICA DE VERDAD: CÁLCULOS FÍSICOS RIGUROSOS
   // ==========================================================================
 
   /**
-   * Calcula el estado eléctrico completo para una carga dada y combinación de capacitores activa.
+   * Resuelve el estado eléctrico completo respetando las leyes de circuitos de CA:
+   * S = sqrt(P^2 + Q^2), FP = P / S, phi = atan2(Q, P), Qc = 2*pi*f*C*V^2.
    */
   function computeElectricalState(vRms, pMotor, qMotor, stepStates) {
-    // 1. Capacitancia total conectada y reactiva aportada
+    // 1. Si el motor está apagado
+    if (pMotor <= 0.1 && qMotor <= 0.1) {
+      return {
+        vRms,
+        iRms: 0.0,
+        pAct: 0.0,
+        qRea: 0.0,
+        sApp: 0.0,
+        fp: 1.0,
+        phiDeg: 0.0,
+        deltaTMs: 0.0,
+        isCapacitive: false,
+        isMotorOff: true,
+        qcReq: 0.0,
+        cReqUF: 0.0,
+        qInjected: 0.0,
+        cTotalUF: 0.0,
+        iReductionPct: 0.0,
+        fpTeorico: 1.0,
+        errorPct: 0.0
+      };
+    }
+
+    // 2. Capacitancia total conectada del banco 1:2:4
     let cTotalUF = 0.0;
     if (stepStates[0]) cTotalUF += STEP_UF[0];
     if (stepStates[1]) cTotalUF += STEP_UF[1];
     if (stepStates[2]) cTotalUF += STEP_UF[2];
 
     const cTotalFarads = cTotalUF * 1e-6;
-    const qInjected = OMEGA * cTotalFarads * (vRms * vRms); // Inyección Qc = omega * C * V^2
+    // Inyección reactiva capacitiva: Qc = omega * C * V^2
+    const qInjected = OMEGA * cTotalFarads * (vRms * vRms);
 
-    // 2. Potencia reactiva neta que ve la red (Q_net = Q_motor - Q_capacitores)
+    // 3. Reactiva neta vista por la red: Q_neta = Q_motor - Q_capacitores
     const qNet = qMotor - qInjected;
-    const isCapacitive = (qNet < -5.0); // Margen de histéresis
+    const isCapacitive = (qNet < -3.0); // Adelanto cuando Q < 0
 
-    // 3. Potencia aparente neta resultante: S = sqrt(P^2 + Q^2)
+    // 4. Potencia aparente neta resultante: S = sqrt(P^2 + Q^2)
     const sApp = Math.sqrt(pMotor * pMotor + qNet * qNet);
 
-    // 4. Corriente eficaz de línea total: I_rms = S / V_rms
+    // 5. Corriente eficaz de línea total: I_rms = S / V_rms
     let iRms = (vRms > 10.0) ? (sApp / vRms) : 0.0;
 
-    // Aplicar transitorio de arranque (pico de 10 - 15 A)
+    // Aplicar transitorio de arranque inrush (10 - 15 A)
     if (state.inrushMultiplier > 1.0) {
       iRms *= state.inrushMultiplier;
     }
 
-    // Actualizar registro Max-Hold de pico de corriente
+    // Registrar pico máximo (Max-Hold)
     if (iRms > state.peakCurrentRecorded) {
       state.peakCurrentRecorded = iRms;
     }
 
-    // Corriente sin compensar en estado estacionario (para cálculo de % de reducción)
-    const sUncompensated = Math.sqrt(pMotor * pMotor + qMotor * qMotor);
-    const iUncomp = (vRms > 10.0) ? (sUncompensated / vRms) : 0.0;
+    // Corriente sin compensar en estado estacionario (para porcentaje de alivio)
+    const sUncomp = Math.sqrt(pMotor * pMotor + qMotor * qMotor);
+    const iUncomp = (vRms > 10.0) ? (sUncomp / vRms) : 0.0;
     const iSteadyState = (vRms > 10.0) ? (sApp / vRms) : 0.0;
     const iReductionPct = (iUncomp > 0.1) ? Math.max(0, ((iUncomp - iSteadyState) / iUncomp) * 100) : 0.0;
 
-    // 5. Factor de Potencia medido verdadero: FP = P / S
-    let fp = (sApp > 1.0) ? (Math.abs(pMotor) / sApp) : 1.0;
+    // 6. Factor de Potencia verdadero: FP = P / S
+    let fp = (sApp > 0.1) ? (Math.abs(pMotor) / sApp) : 1.0;
     if (fp > 1.0) fp = 1.0;
 
-    // 6. Ángulo de desfase phi y tiempo de cruce por cero delta t
-    const phiRad = Math.acos(fp);
+    // 7. Ángulo de desfase phi = atan2(Q, P) y tiempo delta t
+    const phiRad = Math.atan2(Math.abs(qNet), pMotor);
     const phiDeg = phiRad * (180.0 / Math.PI);
     const deltaTMs = (phiDeg / (360.0 * FREQ_RED)) * 1000.0;
 
-    // 7. Dimensionamiento de reactiva y capacitancia requerida para meta FP2 = 0.97
-    // tan(phi_2) = tan(arccos(0.97)) = 0.2506
+    // 8. Dimensionamiento para meta FP2 = 0.97 (tan 14.07° = 0.2506)
     let qcReq = 0.0;
     let cReqUF = 0.0;
     if (!isCapacitive && fp < 0.95 && pMotor > 10.0) {
@@ -275,9 +317,8 @@
       }
     }
 
-    // 8. FP Teórico predicho por el modelo ideal para validación de error
+    // 9. Modelo teórico ideal para validación de error experimental
     const fpTeorico = (sApp > 0.1) ? (pMotor / sApp) : 1.0;
-    // Error experimental entre modelo y simulación con ruido
     const errorPct = Math.abs(fp - fpTeorico) / (fpTeorico || 1) * 100;
 
     return {
@@ -290,6 +331,7 @@
       phiDeg,
       deltaTMs,
       isCapacitive,
+      isMotorOff: false,
       qcReq,
       cReqUF,
       qInjected,
@@ -300,32 +342,287 @@
     };
   }
 
-  /**
-   * Simula un transitorio real de corriente de arranque con pico entre 10 y 15 A.
-   */
-  function triggerInrushPeak() {
-    if (state.simMotor.p < 10.0 && state.simMotor.q < 10.0) {
-      logTerminal('[INRUSH] El motor está apagado. Selecciona un estado de marcha (En Vacío o Carga) para arrancar.');
+  // ==========================================================================
+  // SEGURIDAD: CONTROL DE BLOQUEO DE DESCARGA RC (30 SEGUNDOS)
+  // ==========================================================================
+
+  function isStepLocked(idx) {
+    if (idx < 0 || idx > 2) return false;
+    if (state.stepState[idx]) return false;
+    if (state.lastOffTime[idx] === 0) return false;
+    const elapsed = Date.now() - state.lastOffTime[idx];
+    return elapsed < LOCK_TIME_MS;
+  }
+
+  function getLockRemainingSec(idx) {
+    if (idx < 0 || idx > 2) return 0;
+    if (state.stepState[idx] || state.lastOffTime[idx] === 0) return 0;
+    const elapsed = Date.now() - state.lastOffTime[idx];
+    if (elapsed >= LOCK_TIME_MS) return 0;
+    return (LOCK_TIME_MS - elapsed) / 1000.0;
+  }
+
+  function getEstimatedDischargeVoltage(idx) {
+    const remSec = getLockRemainingSec(idx);
+    if (remSec <= 0) return 0.0;
+    const elapsedSec = (LOCK_TIME_MS / 1000.0) - remSec;
+    const tau = TAU_RC[idx];
+    const vPeak = Math.SQRT2 * (state.telemetry.vRms || 120.0);
+    return Math.max(0.0, vPeak * Math.exp(-elapsedSec / tau));
+  }
+
+  function setStep(idx, newState, bypassLock = false) {
+    if (idx < 0 || idx > 2) return false;
+
+    // Intentar encender
+    if (newState && !state.stepState[idx]) {
+      if (!bypassLock && isStepLocked(idx)) {
+        const rem = getLockRemainingSec(idx).toFixed(1);
+        addAlarm('ADVERTENCIA', `Paso ${idx + 1} (${STEP_UF[idx]} µF) en descarga RC (${rem} s restantes). Reconexión bloqueada por seguridad.`, 'Esperar ciclo completo de 30s de enfriamiento');
+        logTerminal(`[SEGURIDAD] Paso ${idx + 1} (${STEP_UF[idx]} µF) descargando. Restan ${rem} s.`);
+        return false;
+      }
+      state.stepState[idx] = true;
+      logTerminal(`[BANCO] Paso ${idx + 1} (D${idx + 4} · ${STEP_UF[idx]} µF) -> CONECTADO`);
+      addAlarm('INFORMATIVA', `Paso ${idx + 1} (${STEP_UF[idx]} µF) conectado al bus AC.`, 'Monitorear respuesta del factor de potencia');
+      if (state.mode === 'serial') sendSerialCommand(String(idx + 1));
+      return true;
+    }
+    // Desconectar
+    else if (!newState && state.stepState[idx]) {
+      state.stepState[idx] = false;
+      state.lastOffTime[idx] = Date.now();
+      logTerminal(`[BANCO] Paso ${idx + 1} (D${idx + 4} · ${STEP_UF[idx]} µF) -> DESCONECTADO (Bloqueo RC 30s activo)`);
+      addAlarm('INFORMATIVA', `Paso ${idx + 1} (${STEP_UF[idx]} µF) desconectado. Iniciando temporizador RC de 30s.`, 'Seguridad armada');
+      if (state.mode === 'serial') sendSerialCommand(String(idx + 1));
+      return true;
+    }
+    return false;
+  }
+
+  function turnOffAllSteps(bypassLock = true) {
+    logTerminal('[BANCO] Desconexión de emergencia de todos los pasos [0]');
+    for (let i = 0; i < 3; i++) {
+      if (state.stepState[i]) {
+        state.stepState[i] = false;
+        state.lastOffTime[i] = Date.now();
+      }
+    }
+    addAlarm('INFORMATIVA', 'Desconexión de emergencia ejecutada: Todos los capacitores apagados.', 'Verificar estado del motor');
+    if (state.mode === 'serial') sendSerialCommand('0');
+  }
+
+  // ==========================================================================
+  // LAZO DE CONTROL AUTOMÁTICO (HISTÉRESIS 0.95 - 0.99)
+  // ==========================================================================
+  function runAutoControlLoop() {
+    if (!state.isAutoControl) return;
+
+    const now = Date.now();
+    if (now - state.lastAutoActionTime < state.autoActionDelayMs) return;
+
+    const { pAct, qRea, fp, isCapacitive, isMotorOff, vRms } = state.telemetry;
+
+    // Si el motor está en reposo, desconectar capacitores para evitar sobretensión
+    if (isMotorOff || pAct < 10.0) {
+      if (state.stepState.some(Boolean)) {
+        logTerminal('[AUTO] Motor en reposo. Desconectando capacitores por seguridad.');
+        turnOffAllSteps(true);
+        state.lastAutoActionTime = now;
+      }
       return;
     }
-    // Generar un pico realista entre 11.0 y 14.7 A
-    const targetPeak = 11.0 + Math.random() * 3.7;
-    const baseI = Math.max(0.5, (state.telemetry.sApp || 653) / (state.telemetry.vRms || 120));
+
+    // Si ya está en la banda óptima [0.95 - 0.995] y no es capacitivo, no conmutar
+    if (!isCapacitive && fp >= 0.950 && fp <= 0.995) return;
+
+    // Si hay sobrecompensación capacitiva (Q < -5 VAR), apagar pasos
+    if (isCapacitive || qRea < -5.0) {
+      for (let i = 2; i >= 0; i--) {
+        if (state.stepState[i]) {
+          logTerminal(`[AUTO] Sobrecompensación detectada (Q = ${qRea.toFixed(1)} VAR). Apagando Paso ${i + 1}.`);
+          setStep(i, false);
+          state.lastAutoActionTime = now;
+          return;
+        }
+      }
+    }
+
+    // Si el FP es deficiente (< 0.95 inductivo), buscar la combinación binaria óptima (001 a 111)
+    if (fp < 0.95) {
+      let bestCombination = null;
+      let minFpDistance = 999.0;
+
+      for (let code = 1; code < 8; code++) {
+        const candidate = [Boolean(code & 1), Boolean(code & 2), Boolean(code & 4)];
+
+        // Omitir si requiere un paso en bloqueo de 30s
+        let locked = false;
+        for (let i = 0; i < 3; i++) {
+          if (candidate[i] && !state.stepState[i] && isStepLocked(i)) {
+            locked = true;
+            break;
+          }
+        }
+        if (locked) continue;
+
+        // Evaluar resultado
+        const pred = computeElectricalState(vRms, pAct, state.simMotor.q, candidate);
+        if (pred.qRea < -15.0) continue; // Evitar sobrecompensar
+
+        const distance = Math.abs(pred.fp - 0.974);
+        if (distance < minFpDistance) {
+          minFpDistance = distance;
+          bestCombination = candidate;
+        }
+      }
+
+      if (bestCombination) {
+        let changed = false;
+        for (let i = 0; i < 3; i++) {
+          if (bestCombination[i] !== state.stepState[i]) {
+            setStep(i, bestCombination[i]);
+            changed = true;
+          }
+        }
+        if (changed) {
+          logTerminal(`[AUTO] Combinación óptima aplicada [${bestCombination.map(b => b ? 1 : 0).join(', ')}]. Meta FP = 0.974.`);
+          addAlarm('INFORMATIVA', `Maniobra automática: Banco configurado en [${bestCombination.map(b => b ? 1 : 0).join(', ')}]`, 'Factor de potencia optimizado');
+          state.lastAutoActionTime = now;
+        }
+      }
+    }
+  }
+
+  // ==========================================================================
+  // SISTEMA CENTRALIZADO DE ALARMAS INTELIGENTES
+  // ==========================================================================
+
+  function addAlarm(severity, message, suggestion = '') {
+    const time = new Date().toTimeString().split(' ')[0];
+    const alarm = {
+      id: state.alarmCounterId++,
+      severity, // 'CRITICA', 'ADVERTENCIA', 'INFORMATIVA'
+      message,
+      suggestion,
+      timestamp: time,
+      acknowledged: false
+    };
+
+    state.alarms.unshift(alarm);
+    if (state.alarms.length > 50) state.alarms.pop();
+
+    updateAlarmFeed();
+  }
+
+  function checkSupervisoryAlarms() {
+    const t = state.telemetry;
+
+    // Alarma de Sobrecorriente fuera de arranque
+    if (t.iRms > 12.0 && state.inrushMultiplier <= 1.05) {
+      if (!state.alarms.some(a => !a.acknowledged && a.message.includes('Sobrecorriente'))) {
+        addAlarm('CRITICA', `Sobrecorriente detectada: ${t.iRms.toFixed(2)} A excede límite seguro.`, 'Verificar atascamiento mecánico del motor');
+      }
+    }
+
+    // Alarma de Factor de Potencia Bajo
+    if (!t.isMotorOff && t.fp < 0.950 && !t.isCapacitive) {
+      if (!state.alarms.some(a => !a.acknowledged && a.message.includes('FP por debajo'))) {
+        addAlarm('ADVERTENCIA', `FP deficiente: ${t.fp.toFixed(3)} bajo el límite CFE (0.950).`, 'Conectar pasos del banco 1:2:4 o habilitar modo AUTO');
+      }
+    }
+
+    // Alarma de Sobrecompensación (Riesgo Resonancia)
+    if (t.isCapacitive && t.qRea < -5.0) {
+      if (!state.alarms.some(a => !a.acknowledged && a.message.includes('Sobrecompensación'))) {
+        addAlarm('ADVERTENCIA', `Sobrecompensación capacitiva: Q = ${t.qRea.toFixed(1)} VAR (Adelanto).`, 'Desconectar pasos del banco para mitigar sobretensiones');
+      }
+    }
+  }
+
+  function updateAlarmFeed() {
+    if (!dom.alarmFeedContainer) return;
+
+    let critCount = 0;
+    let warnCount = 0;
+
+    let html = '';
+    for (const a of state.alarms) {
+      if (!a.acknowledged) {
+        if (a.severity === 'CRITICA') critCount++;
+        if (a.severity === 'ADVERTENCIA') warnCount++;
+      }
+
+      let colorBorder = 'border-slate-800';
+      let badgeStyle = 'badge-neutral';
+      if (a.severity === 'CRITICA') {
+        colorBorder = 'border-rose-500/40 bg-rose-950/20';
+        badgeStyle = 'badge-critico';
+      } else if (a.severity === 'ADVERTENCIA') {
+        colorBorder = 'border-amber-500/40 bg-amber-950/20';
+        badgeStyle = 'badge-subcompensado';
+      } else {
+        colorBorder = 'border-cyan-500/40 bg-cyan-950/20';
+        badgeStyle = 'badge-optimo';
+      }
+
+      html += `
+        <div class="p-3 rounded-lg border ${colorBorder} space-y-1.5 transition">
+          <div class="flex items-center justify-between text-[11px] font-mono">
+            <span class="px-1.5 py-0.2 rounded font-bold ${badgeStyle}">${a.severity}</span>
+            <span class="text-slate-500">${a.timestamp}</span>
+          </div>
+          <p class="text-xs text-slate-200 leading-snug">${a.message}</p>
+          ${a.suggestion ? `<p class="text-[11px] text-cyan-400 font-mono">⚡ Acción: ${a.suggestion}</p>` : ''}
+        </div>
+      `;
+    }
+
+    if (state.alarms.length === 0) {
+      html = '<div class="text-center py-8 text-xs text-slate-500 font-mono">Sin alarmas activas en el registro.</div>';
+    }
+
+    dom.alarmFeedContainer.innerHTML = html;
+
+    // Badges en header y footer
+    if (dom.alarmCountHeaderBadge) {
+      dom.alarmCountHeaderBadge.textContent = String(critCount + warnCount);
+      dom.alarmCountHeaderBadge.className = (critCount > 0)
+        ? 'text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40 px-1.5 py-0.2 rounded-full animate-pulse'
+        : (warnCount > 0)
+          ? 'text-[10px] font-mono font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40 px-1.5 py-0.2 rounded-full'
+          : 'text-[10px] font-mono font-bold bg-scada-800 text-slate-400 border border-scada-700 px-1.5 py-0.2 rounded-full';
+    }
+
+    if (dom.badgeCritCount) dom.badgeCritCount.textContent = `${critCount} críticas`;
+    if (dom.badgeWarnCount) dom.badgeWarnCount.textContent = `${warnCount} advertencias`;
+  }
+
+  // ==========================================================================
+  // TRANSITORIO DE ARRANQUE (PICO 10 - 15 A)
+  // ==========================================================================
+
+  function triggerInrushPeak() {
+    if (state.simMotor.p <= 0.1 && state.simMotor.q <= 0.1) {
+      logTerminal('[INRUSH] El motor está apagado. Selecciona un estado de marcha primero.');
+      return;
+    }
+
+    // Pico realista de 11.5 A a 14.8 A
+    const targetPeak = 11.5 + Math.random() * 3.3;
+    const baseI = Math.max(0.5, (state.telemetry.sApp || 133.4) / (state.telemetry.vRms || 120.0));
     state.inrushMultiplier = targetPeak / baseI;
 
     if (targetPeak > state.peakCurrentRecorded) {
       state.peakCurrentRecorded = targetPeak;
     }
 
-    logTerminal(`[INRUSH] ¡Transitorio de arranque simulado! Pico de corriente: ${targetPeak.toFixed(2)} A (Medido por ACS712-30A, rango ±30A).`);
-
-    if (dom.valIPeak) {
-      dom.valIPeak.textContent = `${state.peakCurrentRecorded.toFixed(1)} A`;
-    }
+    logTerminal(`[INRUSH] Transitorio de arranque: Pico de corriente ${targetPeak.toFixed(2)} A (Sensado por ACS712-30A sin saturar).`);
+    addAlarm('INFORMATIVA', `Pico transitorio de arranque: ${targetPeak.toFixed(2)} A registrado por el sensor ACS712-30A.`, 'Comportamiento inductivo normal de aceleración');
 
     if (state.inrushDecayTimer) clearInterval(state.inrushDecayTimer);
     const startTime = Date.now();
-    const durationMs = 2000;
+    const durationMs = 1800;
 
     state.inrushDecayTimer = setInterval(() => {
       const elapsed = Date.now() - startTime;
@@ -340,244 +637,45 @@
     }, 50);
   }
 
-  /**
-   * Reinicia el indicador Max-Hold de corriente pico.
-   */
   function resetPeakCurrent() {
-    state.peakCurrentRecorded = state.telemetry.iRms || 5.44;
-    if (dom.valIPeak) {
-      dom.valIPeak.textContent = `${state.peakCurrentRecorded.toFixed(1)} A`;
-    }
-    logTerminal(`[PICO MÁX] Indicador Max-Hold reiniciado a ${state.peakCurrentRecorded.toFixed(2)} A.`);
+    state.peakCurrentRecorded = state.telemetry.iRms || 1.11;
+    logTerminal(`[MAX-HOLD] Indicador de pico reiniciado a ${state.peakCurrentRecorded.toFixed(2)} A.`);
   }
 
   // ==========================================================================
-  // SEGURIDAD: CONTROL DE BLOQUEO DE DESCARGA RC (30 SEGUNDOS)
-  // ==========================================================================
-
-  /**
-   * Verifica si un paso de capacitor puede reconectarse respetando el bloqueo de 30s.
-   */
-  function isStepLocked(idx) {
-    if (idx < 0 || idx > 2) return false;
-    if (state.stepState[idx]) return false; // Ya está encendido
-    if (state.lastOffTime[idx] === 0) return false;
-
-    const elapsed = Date.now() - state.lastOffTime[idx];
-    return elapsed < LOCK_TIME_MS;
-  }
-
-  /**
-   * Obtiene los segundos restantes de descarga para un paso dado.
-   */
-  function getLockRemainingSec(idx) {
-    if (idx < 0 || idx > 2) return 0;
-    if (state.stepState[idx] || state.lastOffTime[idx] === 0) return 0;
-
-    const elapsed = Date.now() - state.lastOffTime[idx];
-    if (elapsed >= LOCK_TIME_MS) return 0;
-    return (LOCK_TIME_MS - elapsed) / 1000.0;
-  }
-
-  /**
-   * Calcula el voltaje remanente estimado en el capacitor según la curva de descarga RC:
-   * V(t) = V_peak * exp(-t / tau), donde V_peak = sqrt(2) * 120V = 169.7V
-   */
-  function getEstimatedDischargeVoltage(idx) {
-    const remSec = getLockRemainingSec(idx);
-    if (remSec <= 0) return 0.0;
-    const elapsedSec = (LOCK_TIME_MS / 1000.0) - remSec;
-    const tau = TAU_RC[idx];
-    const vPeak = Math.SQRT2 * (state.telemetry.vRms || 120.0);
-    const vRem = vPeak * Math.exp(-elapsedSec / tau);
-    return Math.max(0.0, vRem);
-  }
-
-  /**
-   * Enciende o apaga un paso físico/simulado respetando bloqueos.
-   */
-  function setStep(idx, newState, bypassLock = false) {
-    if (idx < 0 || idx > 2) return false;
-
-    // Intentar encender
-    if (newState && !state.stepState[idx]) {
-      if (!bypassLock && isStepLocked(idx)) {
-        const rem = getLockRemainingSec(idx).toFixed(1);
-        logTerminal(`[BLOQUEO DE SEGURIDAD] Paso ${idx + 1} (${STEP_UF[idx]} µF) descargando. Restan ${rem} s (τ = ${TAU_RC[idx]}s). Reconexión inhibida.`);
-        return false;
-      }
-      state.stepState[idx] = true;
-      logTerminal(`[BANCO] Paso ${idx + 1} (LED ${['ROJO','AZUL','VERDE'][idx]}, ${STEP_UF[idx]} µF) -> CONECTADO`);
-      if (state.mode === 'serial') {
-        sendSerialCommand(String(idx + 1));
-      }
-      return true;
-    }
-    // Apagar
-    else if (!newState && state.stepState[idx]) {
-      state.stepState[idx] = false;
-      state.lastOffTime[idx] = Date.now();
-      logTerminal(`[BANCO] Paso ${idx + 1} (LED ${['ROJO','AZUL','VERDE'][idx]}, ${STEP_UF[idx]} µF) -> DESCONECTADO (Iniciando temporizador RC 30s)`);
-      if (state.mode === 'serial') {
-        sendSerialCommand(String(idx + 1));
-      }
-      return true;
-    }
-    return false;
-  }
-
-  function turnOffAllSteps(bypassLock = true) {
-    logTerminal(`[BANCO] Desconexión de emergencia / Apagar todos los pasos [0]`);
-    for (let i = 0; i < 3; i++) {
-      if (state.stepState[i]) {
-        state.stepState[i] = false;
-        state.lastOffTime[i] = Date.now();
-      }
-    }
-    if (state.mode === 'serial') {
-      sendSerialCommand('0');
-    }
-  }
-
-  // ==========================================================================
-  // LAZO DE CONTROL AUTOMÁTICO (HISTÉRESIS 0.95 - 0.99)
-  // ==========================================================================
-  function runAutoControlLoop() {
-    if (!state.isAutoControl) return;
-
-    const now = Date.now();
-    if (now - state.lastAutoActionTime < state.autoActionDelayMs) {
-      return; // Esperar ventana mínima entre maniobras para estabilidad de red
-    }
-
-    const { pAct, qRea, fp, isCapacitive, vRms } = state.telemetry;
-
-    // 1. Regla de seguridad: si el motor está apagado o I < 0.5A, apagar capacitores para evitar sobretensión capacitiva
-    if (pAct < 20.0 || state.telemetry.iRms < 0.5) {
-      const anyOn = state.stepState.some(Boolean);
-      if (anyOn) {
-        logTerminal(`[AUTO] Motor en reposo o corriente mínima. Desconectando banco por seguridad.`);
-        turnOffAllSteps(true);
-        state.lastAutoActionTime = now;
-      }
-      return;
-    }
-
-    // 2. Si ya está en la banda óptima [0.95 - 0.99] y no es capacitivo, mantener estado
-    if (!isCapacitive && fp >= 0.95 && fp <= 0.995) {
-      return;
-    }
-
-    // 3. Si hay sobrecompensación capacitiva (Q < -5 VAR o FP < 0.95 adelantado), reducir capacitancia
-    if (isCapacitive || qRea < -5.0) {
-      // Intentar apagar primero el paso más grande disponible o el ajuste fino
-      for (let i = 2; i >= 0; i--) {
-        if (state.stepState[i]) {
-          logTerminal(`[AUTO] Sobrecompensación detectada (Q = ${qRea.toFixed(1)} VAR). Apagando Paso ${i + 1} (${STEP_UF[i]} µF).`);
-          setStep(i, false);
-          state.lastAutoActionTime = now;
-          return;
-        }
-      }
-    }
-
-    // 4. Si el FP es deficiente (< 0.95 inductivo), buscar la mejor combinación binaria de las 8 posibles
-    // que acerque el FP a 0.97 sin provocar sobrecompensación capacitiva y cuyos pasos apagados NO estén bloqueados por descarga
-    if (fp < 0.95) {
-      let bestCombination = null;
-      let minFpDistance = 999.0;
-
-      // Evaluar las 8 combinaciones posibles (000 a 111)
-      for (let code = 1; code < 8; code++) {
-        const candidateSteps = [
-          Boolean(code & 1), // Paso 1 (15 uF)
-          Boolean(code & 2), // Paso 2 (30 uF)
-          Boolean(code & 4)  // Paso 3 (60 uF)
-        ];
-
-        // Verificar si la combinación requiere encender un paso que está en bloqueo de 30s
-        let hasLockedStep = false;
-        for (let i = 0; i < 3; i++) {
-          if (candidateSteps[i] && !state.stepState[i] && isStepLocked(i)) {
-            hasLockedStep = true;
-            break;
-          }
-        }
-        if (hasLockedStep) continue; // No se puede usar esta combinación por ahora
-
-        // Calcular el resultado predicho para esta combinación
-        const pred = computeElectricalState(vRms, pAct, state.simMotor.q, candidateSteps);
-
-        // Descartar si provoca sobrecompensación severa
-        if (pred.qRea < -20.0) continue;
-
-        // Distancia a la meta FP = 0.97
-        const distance = Math.abs(pred.fp - 0.970);
-        if (distance < minFpDistance) {
-          minFpDistance = distance;
-          bestCombination = candidateSteps;
-        }
-      }
-
-      // Aplicar la mejor combinación encontrada
-      if (bestCombination) {
-        let changed = false;
-        for (let i = 0; i < 3; i++) {
-          if (bestCombination[i] !== state.stepState[i]) {
-            setStep(i, bestCombination[i]);
-            changed = true;
-          }
-        }
-        if (changed) {
-          logTerminal(`[AUTO] Algoritmo de optimización seleccionó combinación óptima [${bestCombination.map(b => b ? 1 : 0).join(', ')}]. Meta FP = 0.97.`);
-          state.lastAutoActionTime = now;
-        }
-      }
-    }
-  }
-
-  // ==========================================================================
-  // MOTOR DE SIMULACIÓN (MODO SIN ARDUINO)
+  // SIMULADOR LOCAL
   // ==========================================================================
   function runSimulationStep() {
     if (state.mode !== 'sim') return;
 
-    // Agregar ligera fluctuación estocástica de laboratorio (±0.4 V, ±0.03 A, ±2 W)
-    const noiseV = (Math.random() - 0.5) * 0.6;
-    const noiseP = (Math.random() - 0.5) * 3.0;
-    const noiseQ = (Math.random() - 0.5) * 4.0;
+    // Ruido suave de laboratorio
+    const noiseV = (Math.random() - 0.5) * 0.4;
+    const noiseP = (state.simMotor.p > 10) ? (Math.random() - 0.5) * 1.5 : 0;
+    const noiseQ = (state.simMotor.q > 10) ? (Math.random() - 0.5) * 2.0 : 0;
 
     const vSim = Math.max(0, state.simMotor.v + noiseV);
-    const pSim = Math.max(0, state.simMotor.p + (state.simMotor.p > 10 ? noiseP : 0));
-    const qSim = Math.max(0, state.simMotor.q + (state.simMotor.q > 10 ? noiseQ : 0));
+    const pSim = Math.max(0, state.simMotor.p + noiseP);
+    const qSim = Math.max(0, state.simMotor.q + noiseQ);
 
-    // Computar parámetros de la red
-    const result = computeElectricalState(vSim, pSim, qSim, state.stepState);
-    state.telemetry = result;
+    state.telemetry = computeElectricalState(vSim, pSim, qSim, state.stepState);
 
-    // Ejecutar lógica de control automático si está habilitada
     runAutoControlLoop();
-
-    // Actualizar interfaz y registrar en buffer histórico
+    checkSupervisoryAlarms();
     updateUI();
     recordTelemetryHistory();
   }
 
   // ==========================================================================
-  // COMUNICACIÓN CON ARDUINO NANO (WEB SERIAL API)
+  // WEB SERIAL API (ARDUINO NANO ATMEGA328P A 115200 BAUD)
   // ==========================================================================
 
-  /**
-   * Intenta conectar con el puerto serie USB del Arduino Nano a 115200 baudios.
-   */
   async function connectSerial() {
     if (!('serial' in navigator)) {
-      alert('La Web Serial API no está soportada en este navegador.\nPor favor, abre esta aplicación en Google Chrome, Microsoft Edge, Opera o Brave para conectar el Arduino Nano.');
+      alert('La Web Serial API no está soportada en este navegador.\nUsa Google Chrome, Microsoft Edge o Brave.');
       return;
     }
 
     try {
-      // Si ya está conectado, desconectar
       if (state.serial.port) {
         await disconnectSerial();
         return;
@@ -591,31 +689,26 @@
       state.mode = 'serial';
       state.serial.keepReading = true;
 
-      // Actualizar botón y badges
-      dom.serialBtnLabel.textContent = 'Desconectar Arduino';
-      dom.btnConnectSerial.classList.replace('from-sky-600', 'from-emerald-600');
-      dom.btnConnectSerial.classList.replace('to-blue-600', 'to-teal-600');
-      dom.modeBadge.classList.replace('text-emerald-400', 'text-sky-400');
-      dom.modeBadge.classList.replace('border-emerald-500/30', 'border-sky-500/30');
-      dom.modeBadge.classList.replace('bg-emerald-500/10', 'bg-sky-500/10');
-      dom.modeText.textContent = 'ARDUINO NANO CONECTADO';
+      dom.serialBtnLabel.textContent = 'Desconectar';
+      dom.btnConnectSerial.classList.replace('bg-blue-600', 'bg-emerald-600');
+      dom.modeBadge.classList.replace('text-emerald-400', 'text-cyan-400');
+      dom.modeBadge.classList.replace('border-emerald-500/30', 'border-cyan-500/30');
+      dom.modeBadge.classList.replace('bg-emerald-500/10', 'bg-cyan-500/10');
+      dom.modeText.textContent = 'ARDUINO NANO';
 
-      logTerminal('[SERIAL] Conexión establecida a 115200 baudios.');
-      logTerminal('[SERIAL] Enviando comando \'j\' para habilitar telemetría JSON...');
+      logTerminal('[SERIAL] Conectado a 115200 baudios.');
+      logTerminal('[SERIAL] Enviando comando \'j\' para activar telemetría JSON...');
+      addAlarm('INFORMATIVA', 'Arduino Nano conectado por USB. Adquisición por hardware activa.', 'Monitorear flujo JSON');
 
-      // Crear writer
       const encoder = new TextEncoderStream();
-      const outputDone = encoder.readable.pipeTo(port.writable);
+      encoder.readable.pipeTo(port.writable);
       state.serial.writer = encoder.writable.getWriter();
-
-      // Enviar 'j' para asegurar modo JSON
       await state.serial.writer.write('j\n');
 
-      // Iniciar bucle de lectura
       readSerialLoop(port);
 
     } catch (err) {
-      logTerminal(`[ERROR SERIAL] No se pudo conectar: ${err.message}`);
+      logTerminal(`[ERROR SERIAL] Fallo al conectar: ${err.message}`);
       await disconnectSerial();
     }
   }
@@ -623,31 +716,22 @@
   async function disconnectSerial() {
     state.serial.keepReading = false;
     try {
-      if (state.serial.reader) {
-        await state.serial.reader.cancel();
-        state.serial.reader = null;
-      }
-      if (state.serial.writer) {
-        await state.serial.writer.close();
-        state.serial.writer = null;
-      }
-      if (state.serial.port) {
-        await state.serial.port.close();
-        state.serial.port = null;
-      }
+      if (state.serial.reader) { await state.serial.reader.cancel(); state.serial.reader = null; }
+      if (state.serial.writer) { await state.serial.writer.close(); state.serial.writer = null; }
+      if (state.serial.port) { await state.serial.port.close(); state.serial.port = null; }
     } catch (e) {
       console.warn('Cierre de puerto:', e);
     }
 
     state.mode = 'sim';
-    dom.serialBtnLabel.textContent = 'Conectar Arduino Nano (USB)';
-    dom.btnConnectSerial.classList.replace('from-emerald-600', 'from-sky-600');
-    dom.btnConnectSerial.classList.replace('to-teal-600', 'to-blue-600');
-    dom.modeBadge.classList.replace('text-sky-400', 'text-emerald-400');
-    dom.modeBadge.classList.replace('border-sky-500/30', 'border-emerald-500/30');
-    dom.modeBadge.classList.replace('bg-sky-500/10', 'bg-emerald-500/10');
-    dom.modeText.textContent = 'SIMULACIÓN ACTIVA';
+    dom.serialBtnLabel.textContent = 'Conectar USB';
+    dom.btnConnectSerial.classList.replace('bg-emerald-600', 'bg-blue-600');
+    dom.modeBadge.classList.replace('text-cyan-400', 'text-emerald-400');
+    dom.modeBadge.classList.replace('border-cyan-500/30', 'border-emerald-500/30');
+    dom.modeBadge.classList.replace('bg-cyan-500/10', 'bg-emerald-500/10');
+    dom.modeText.textContent = 'SIMULACIÓN';
     logTerminal('[SERIAL] Desconectado. Regresando a modo simulación local.');
+    addAlarm('INFORMATIVA', 'Arduino Nano desconectado. Sistema en modo simulación.', 'Reconectar cuando sea necesario');
   }
 
   async function readSerialLoop(port) {
@@ -666,21 +750,16 @@
             const chunk = state.serial.textDecoder.decode(value);
             state.serial.buffer += chunk;
 
-            // Procesar líneas delimitadas por \n
             let lineEndIdx;
             while ((lineEndIdx = state.serial.buffer.indexOf('\n')) >= 0) {
               const line = state.serial.buffer.slice(0, lineEndIdx).trim();
               state.serial.buffer = state.serial.buffer.slice(lineEndIdx + 1);
-              if (line.length > 0) {
-                handleSerialLine(line);
-              }
+              if (line.length > 0) handleSerialLine(line);
             }
           }
         }
       } catch (err) {
-        if (state.serial.keepReading) {
-          logTerminal(`[ERROR LECTURA SERIAL] ${err.message}`);
-        }
+        if (state.serial.keepReading) logTerminal(`[ERROR LECTURA SERIAL] ${err.message}`);
         break;
       } finally {
         if (state.serial.reader) {
@@ -691,16 +770,10 @@
     }
   }
 
-  /**
-   * Procesa cada línea recibida del Arduino Nano (JSON de telemetría o texto de depuración).
-   */
   function handleSerialLine(line) {
-    // Si es JSON del firmware: {"v":...,"i":...,"p":...,"q":...,"s":...,"fp":...,"phi":...,"cap":...,"qc_req":...,"c_req":...,"leds":[...],"lock":[...]}
     if (line.startsWith('{') && line.endsWith('}')) {
       try {
         const data = JSON.parse(line);
-        
-        // Mapear telemetría
         state.telemetry.vRms = data.v || 0.0;
         state.telemetry.iRms = data.i || 0.0;
         state.telemetry.pAct = data.p || 0.0;
@@ -713,12 +786,10 @@
         state.telemetry.qcReq = data.qc_req || 0.0;
         state.telemetry.cReqUF = data.c_req || 0.0;
 
-        // Actualizar estados de LEDs según el hardware
         if (Array.isArray(data.leds) && data.leds.length === 3) {
-          state.stepState = data.leds.map(val => Boolean(val));
+          state.stepState = data.leds.map(Boolean);
         }
 
-        // Tiempos de descarga
         if (Array.isArray(data.lock) && data.lock.length === 3) {
           for (let i = 0; i < 3; i++) {
             if (data.lock[i] > 0) {
@@ -727,7 +798,6 @@
           }
         }
 
-        // Cálculos complementarios
         let cTot = 0;
         if (state.stepState[0]) cTot += STEP_UF[0];
         if (state.stepState[1]) cTot += STEP_UF[1];
@@ -735,239 +805,337 @@
         state.telemetry.cTotalUF = cTot;
         state.telemetry.qInjected = OMEGA * (cTot * 1e-6) * Math.pow(state.telemetry.vRms, 2);
 
-        // Modelo teórico para error
-        const qMotorEst = state.telemetry.qRea + state.telemetry.qInjected;
         const sTeo = Math.sqrt(Math.pow(state.telemetry.pAct, 2) + Math.pow(state.telemetry.qRea, 2));
         state.telemetry.fpTeorico = (sTeo > 0.1) ? (state.telemetry.pAct / sTeo) : 1.0;
         state.telemetry.errorPct = Math.abs(state.telemetry.fp - state.telemetry.fpTeorico) / (state.telemetry.fpTeorico || 1) * 100;
 
-        // Reducción de corriente
+        const qMotorEst = state.telemetry.qRea + state.telemetry.qInjected;
         const sSinComp = Math.sqrt(Math.pow(state.telemetry.pAct, 2) + Math.pow(qMotorEst, 2));
         const iSinComp = (state.telemetry.vRms > 10) ? (sSinComp / state.telemetry.vRms) : 0;
         state.telemetry.iReductionPct = (iSinComp > 0.1) ? Math.max(0, ((iSinComp - state.telemetry.iRms) / iSinComp) * 100) : 0;
 
         updateUI();
         recordTelemetryHistory();
-
-      } catch (err) {
-        logTerminal(`[JSON PARSE ERROR] ${line}`);
+      } catch (e) {
+        logTerminal(`[JSON ERROR] ${line}`);
       }
     } else {
-      // Línea de texto normal (banners, calibración, etc.)
       logTerminal(line);
     }
   }
 
-  /**
-   * Envía un comando por el puerto serie USB al Arduino Nano.
-   */
   async function sendSerialCommand(cmd) {
     if (state.serial.writer) {
       try {
         await state.serial.writer.write(cmd + '\n');
-        logTerminal(`[TX >> ARDUINO] Comando '${cmd}' enviado.`);
+        logTerminal(`[TX >> ARDUINO] '${cmd}'`);
       } catch (err) {
-        logTerminal(`[TX ERROR] Fallo al enviar '${cmd}': ${err.message}`);
+        logTerminal(`[TX ERROR] Fallo: ${err.message}`);
       }
     } else {
-      logTerminal(`[TX SIM] Comando '${cmd}' procesado localmente.`);
+      logTerminal(`[TX SIM] '${cmd}'`);
     }
   }
 
   // ==========================================================================
-  // ACTUALIZACIÓN DE LA INTERFAZ GRÁFICA (DOM)
+  // ACTUALIZACIÓN DE INTERFAZ SCADA (DOM)
   // ==========================================================================
   function updateUI() {
     const t = state.telemetry;
 
-    // 1. Tarjetas KPI
+    // 1. MEDIDOR PROTAGONISTA DE FACTOR DE POTENCIA
+    dom.valFP.textContent = t.isMotorOff ? '0.000' : t.fp.toFixed(3);
+    dom.valPhiDeg.textContent = t.isMotorOff ? '0.0' : t.phiDeg.toFixed(1);
+    dom.valDeltaT.textContent = t.isMotorOff ? '0.00 ms' : `${t.deltaTMs.toFixed(2)} ms`;
+
+    if (t.isMotorOff) {
+      dom.fpStatusBadge.textContent = 'MOTOR APAGADO';
+      dom.fpStatusBadge.className = 'px-2.5 py-0.5 rounded text-[11px] font-mono font-bold badge-neutral';
+      dom.valFpRegime.textContent = 'Sin Carga Activa';
+      dom.valFpRegime.className = 'text-slate-400 font-bold';
+      dom.fpConditionSummary.textContent = 'En Reposo Seguro';
+      dom.fpConditionSummary.className = 'text-slate-400 font-medium';
+    } else if (t.isCapacitive) {
+      dom.fpStatusBadge.textContent = 'SOBRECOMPENSADO · ADELANTO';
+      dom.fpStatusBadge.className = 'px-2.5 py-0.5 rounded text-[11px] font-mono font-bold badge-sobrecompensado';
+      dom.valFpRegime.textContent = 'ADELANTO (Capacitivo)';
+      dom.valFpRegime.className = 'text-purple-400 font-bold';
+      dom.fpConditionSummary.textContent = 'Riesgo de Resonancia';
+      dom.fpConditionSummary.className = 'text-purple-400 font-medium';
+    } else if (t.fp >= 0.950 && t.fp <= 0.990) {
+      dom.fpStatusBadge.textContent = 'ÓPTIMO EN RANGO';
+      dom.fpStatusBadge.className = 'px-2.5 py-0.5 rounded text-[11px] font-mono font-bold badge-optimo';
+      dom.valFpRegime.textContent = 'ATRASO (Inductivo)';
+      dom.valFpRegime.className = 'text-emerald-400 font-bold';
+      dom.fpConditionSummary.textContent = 'Cumple Norma CFE (0.95–0.99)';
+      dom.fpConditionSummary.className = 'text-emerald-400 font-medium';
+    } else if (t.fp > 0.990) {
+      dom.fpStatusBadge.textContent = 'UNITARIO / AL LÍMITE';
+      dom.fpStatusBadge.className = 'px-2.5 py-0.5 rounded text-[11px] font-mono font-bold badge-optimo';
+      dom.valFpRegime.textContent = 'ATRASO Mínimo';
+      dom.valFpRegime.className = 'text-emerald-300 font-bold';
+      dom.fpConditionSummary.textContent = 'Excelente Compensación';
+      dom.fpConditionSummary.className = 'text-emerald-400 font-medium';
+    } else {
+      dom.fpStatusBadge.textContent = 'SUBCOMPENSADO · ATRASO';
+      dom.fpStatusBadge.className = 'px-2.5 py-0.5 rounded text-[11px] font-mono font-bold badge-critico';
+      dom.valFpRegime.textContent = 'ATRASO (Inductivo Puro)';
+      dom.valFpRegime.className = 'text-amber-400 font-bold';
+      dom.fpConditionSummary.textContent = (t.fp <= 0.25) ? 'Vacío sin Compensar (FP ≈ 0.21)' : 'Bajo Límite CFE (< 0.95)';
+      dom.fpConditionSummary.className = 'text-amber-400 font-medium';
+    }
+
+    renderFpGauge(t.isMotorOff ? 0 : t.fp, t.isCapacitive);
+
+    // 2. PANEL VISUAL DEL MOTOR WEG W01
+    if (t.isMotorOff) {
+      dom.cardMotorWeg.classList.remove('motor-running-active');
+      dom.motorStatusDot.className = 'w-2 h-2 rounded-full bg-slate-500';
+      dom.badgeMotorState.textContent = 'APAGADO';
+      dom.badgeMotorState.className = 'px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700';
+      dom.motorRunningIndicator.classList.add('hidden');
+      dom.motorLoadText.textContent = 'En Reposo';
+      dom.motorPText.textContent = '0 W';
+    } else {
+      dom.cardMotorWeg.classList.add('motor-running-active');
+      dom.motorStatusDot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+      dom.badgeMotorState.textContent = 'ENCENDIDO';
+      dom.badgeMotorState.className = 'px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
+      dom.motorRunningIndicator.classList.remove('hidden');
+
+      if (state.motorPresetKey === 'empty') dom.motorLoadText.textContent = 'En Vacío (Lab)';
+      else if (state.motorPresetKey === 'mid') dom.motorLoadText.textContent = 'Carga Media';
+      else dom.motorLoadText.textContent = 'Plena Carga';
+
+      dom.motorPText.textContent = `${t.pAct.toFixed(0)} W`;
+    }
+
+    // 3. BANCO DE CAPACITORES 1:2:4
+    dom.badgeCapTotal.textContent = `${t.cTotalUF.toFixed(0)} µF`;
+
+    // Step 1
+    dom.ledCore1.className = state.stepState[0] ? 'scada-led-core led-red-on' : 'scada-led-core led-red-off';
+    dom.ledStateText1.textContent = state.stepState[0] ? 'ON' : 'OFF';
+    dom.ledStateText1.className = state.stepState[0] ? 'text-[11px] font-mono font-bold text-emerald-400' : 'text-[11px] font-mono font-bold text-slate-500';
+    dom.btnStepToggle1.disabled = state.isAutoControl || isStepLocked(0);
+
+    // Step 2
+    dom.ledCore2.className = state.stepState[1] ? 'scada-led-core led-blue-on' : 'scada-led-core led-blue-off';
+    dom.ledStateText2.textContent = state.stepState[1] ? 'ON' : 'OFF';
+    dom.ledStateText2.className = state.stepState[1] ? 'text-[11px] font-mono font-bold text-emerald-400' : 'text-[11px] font-mono font-bold text-slate-500';
+    dom.btnStepToggle2.disabled = state.isAutoControl || isStepLocked(1);
+
+    // Step 3
+    dom.ledCore3.className = state.stepState[2] ? 'scada-led-core led-green-on' : 'scada-led-core led-green-off';
+    dom.ledStateText3.textContent = state.stepState[2] ? 'ON' : 'OFF';
+    dom.ledStateText3.className = state.stepState[2] ? 'text-[11px] font-mono font-bold text-emerald-400' : 'text-[11px] font-mono font-bold text-slate-500';
+    dom.btnStepToggle3.disabled = state.isAutoControl || isStepLocked(2);
+
+    // Bloqueo de Descarga RC
+    let maxLockRem = Math.max(getLockRemainingSec(0), getLockRemainingSec(1), getLockRemainingSec(2));
+    if (maxLockRem > 0) {
+      dom.lockStatusSummary.textContent = `DESCARGANDO ${maxLockRem.toFixed(1)} s`;
+      dom.lockStatusSummary.className = 'text-amber-400 font-semibold';
+      const pct = (maxLockRem / (LOCK_TIME_MS / 1000.0)) * 100;
+      dom.lockBarFill.style.width = `${pct}%`;
+    } else {
+      dom.lockStatusSummary.textContent = 'DISPONIBLE (0.0 V)';
+      dom.lockStatusSummary.className = 'text-emerald-400 font-semibold';
+      dom.lockBarFill.style.width = '0%';
+    }
+
+    // 4. 4 TARJETAS KPI
     dom.valVrms.textContent = t.vRms.toFixed(1);
     dom.valIrms.textContent = t.iRms.toFixed(2);
-    if (dom.valIPeak) {
-      dom.valIPeak.textContent = `${state.peakCurrentRecorded.toFixed(1)} A`;
-    }
+    dom.valIPeak.textContent = `${state.peakCurrentRecorded.toFixed(1)} A`;
     dom.valIReduction.textContent = `-${t.iReductionPct.toFixed(1)}%`;
-    dom.valIReduction.className = (t.iReductionPct > 5.0) ? 'text-emerald-400 font-mono font-bold' : 'text-slate-400 font-mono';
+    dom.valIReduction.className = (t.iReductionPct > 5)
+      ? 'text-[11px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+      : 'text-[11px] font-mono px-1.5 py-0.5 rounded bg-scada-800 text-slate-400 border border-scada-700';
 
     dom.valP.textContent = t.pAct.toFixed(1);
-    if (state.motorPresetKey === 'empty') {
-      dom.valPLoadPct.textContent = 'En Vacío (Lab)';
-      dom.valPLoadPct.className = 'text-emerald-400 font-mono';
-    } else {
-      const pNominalMotor = 588.0;
-      const loadPct = (pNominalMotor > 0) ? Math.min(150, Math.round((t.pAct / pNominalMotor) * 100)) : 0;
-      dom.valPLoadPct.textContent = `${loadPct}% Carga`;
-      dom.valPLoadPct.className = 'text-slate-300 font-mono';
-    }
+    if (state.motorPresetKey === 'empty') dom.valPLoadPct.textContent = 'En Vacío (Lab)';
+    else if (state.motorPresetKey === 'mid') dom.valPLoadPct.textContent = '59% Carga';
+    else if (state.motorPresetKey === 'full') dom.valPLoadPct.textContent = '100% Carga';
+    else dom.valPLoadPct.textContent = 'Reposo 0%';
 
     dom.valQ.textContent = Math.abs(t.qRea).toFixed(1);
-    dom.valQInjected.textContent = `${t.qInjected.toFixed(1)} VAR`;
+    const qMotorBase = (state.mode === 'sim') ? state.simMotor.q : (t.qRea + t.qInjected);
+    dom.valQMotorText.textContent = qMotorBase.toFixed(0);
+    dom.valQInjectedText.textContent = `-${t.qInjected.toFixed(0)}`;
 
     if (t.isCapacitive) {
       dom.badgeQState.textContent = 'ADELANTO';
-      dom.badgeQState.className = 'px-1.5 py-0.5 rounded text-[10px] font-mono bg-blue-500/20 text-blue-400 border border-blue-500/30';
+      dom.badgeQState.className = 'text-[10px] font-mono px-1.5 py-0.2 rounded bg-purple-500/15 text-purple-400 border border-purple-500/30';
     } else {
       dom.badgeQState.textContent = 'ATRASO';
-      dom.badgeQState.className = 'px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-500/20 text-amber-400 border border-amber-500/30';
+      dom.badgeQState.className = 'text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30';
     }
 
-    dom.valS.textContent = t.sApp.toFixed(1);
-    dom.valDeltaT.textContent = `${t.deltaTMs.toFixed(2)} ms`;
+    // 5. MEMORIA DE CÁLCULO (PESTAÑA INGENIERÍA)
+    updateMathMemo();
 
-    // 2. Medidor de Factor de Potencia (FP) & Gauge
-    dom.valFP.textContent = t.fp.toFixed(3);
-    dom.valPhiDeg.textContent = t.phiDeg.toFixed(1);
-
-    // Ajustar color y badge según el estado del FP
-    if (t.isCapacitive) {
-      dom.fpStatusBadge.textContent = 'SOBRECOMPENSADO';
-      dom.fpStatusBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-purple-500/20 text-purple-400 border border-purple-500/30';
-      dom.fpGaugeProgress.className = 'text-purple-500 transition-all duration-500 ease-out';
-      dom.fpZoneLabel.textContent = 'Riesgo Resonancia';
-      dom.fpZoneLabel.className = 'text-purple-400 font-medium';
-    } else if (t.fp >= 0.95 && t.fp <= 0.99) {
-      dom.fpStatusBadge.textContent = 'ÓPTIMO (OBJETIVO)';
-      dom.fpStatusBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
-      dom.fpGaugeProgress.className = 'text-emerald-400 transition-all duration-500 ease-out';
-      dom.fpZoneLabel.textContent = 'Dentro de Norma CFE';
-      dom.fpZoneLabel.className = 'text-emerald-400 font-semibold';
-    } else if (t.fp >= 0.85) {
-      dom.fpStatusBadge.textContent = 'ACEPTABLE';
-      dom.fpStatusBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-yellow-500/20 text-yellow-400 border border-yellow-500/30';
-      dom.fpGaugeProgress.className = 'text-yellow-400 transition-all duration-500 ease-out';
-      dom.fpZoneLabel.textContent = 'Banda Intermedia';
-      dom.fpZoneLabel.className = 'text-yellow-400 font-medium';
-    } else if (t.fp <= 0.22) {
-      dom.fpStatusBadge.textContent = 'VACÍO (FP ≤ 0.20)';
-      dom.fpStatusBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30';
-      dom.fpGaugeProgress.className = 'text-rose-500 transition-all duration-500 ease-out';
-      dom.fpZoneLabel.textContent = 'Vacío Lab (Máx 0.20)';
-      dom.fpZoneLabel.className = 'text-rose-400 font-medium';
-    } else {
-      dom.fpStatusBadge.textContent = 'DEFICIENTE';
-      dom.fpStatusBadge.className = 'px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30';
-      dom.fpGaugeProgress.className = 'text-rose-500 transition-all duration-500 ease-out';
-      dom.fpZoneLabel.textContent = 'Bajo Límite CFE';
-      dom.fpZoneLabel.className = 'text-rose-400 font-medium';
-    }
-
-    // Actualizar arco SVG del gauge (escala de 0.20 a 1.00 -> 0% a 100%)
-    const pct = Math.max(0, Math.min(100, Math.round(t.fp * 100)));
-    dom.fpGaugeProgress.setAttribute('stroke-dasharray', `${pct}, 100`);
-
-    // 3. Resumen del Banco
-    dom.badgeCapTotal.textContent = `${t.cTotalUF.toFixed(1)} µF`;
-    const binStr = `[${state.stepState[0] ? 1 : 0}, ${state.stepState[1] ? 1 : 0}, ${state.stepState[2] ? 1 : 0}]`;
+    // 6. TABLA DE VERDAD 1:2:4
     const stepDec = (state.stepState[0] ? 1 : 0) + (state.stepState[1] ? 2 : 0) + (state.stepState[2] ? 4 : 0);
-    dom.badgeBinaryCode.textContent = `${binStr} (Paso ${stepDec}/7)`;
-
-    // 4. Actualizar los 3 Canales de LEDs Físicos (Rojo, Azul, Verde)
-    updateLEDChannel(0, dom.bezelLed1, dom.coreLed1, dom.badgeStateLed1, dom.lockTimerText1, dom.lockProgressBar1, dom.btnToggleStep1, 'red');
-    updateLEDChannel(1, dom.bezelLed2, dom.coreLed2, dom.badgeStateLed2, dom.lockTimerText2, dom.lockProgressBar2, dom.btnToggleStep2, 'blue');
-    updateLEDChannel(2, dom.bezelLed3, dom.coreLed3, dom.badgeStateLed3, dom.lockTimerText3, dom.lockProgressBar3, dom.btnToggleStep3, 'green');
-
-    // 5. Actualizar Memoria de Cálculo
-    updateMathFormulas();
-
-    // 6. Actualizar Tabla de Verdad
     updateTruthTable(stepDec);
   }
 
-  /**
-   * Actualiza el aspecto óptico, barra RC de descarga y botón de un canal LED individual.
-   */
-  function updateLEDChannel(idx, bezelEl, coreEl, badgeEl, lockTextEl, lockProgressEl, btnEl, colorName) {
-    const isOn = state.stepState[idx];
-    const remSec = getLockRemainingSec(idx);
-    const isLocked = (remSec > 0);
+  // ==========================================================================
+  // INSTRUMENTO PRINCIPAL: GAUGE SEMICIRCULAR DE FACTOR DE POTENCIA
+  // ==========================================================================
+  function renderFpGauge(fpVal, isCapacitive) {
+    const canvas = dom.fpGaugeCanvas;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
 
-    // Apariencia del diodo LED 3D
-    if (isOn) {
-      bezelEl.className = `led-bezel led-${colorName}-active`;
-      coreEl.className = `led-core led-${colorName} led-on`;
-      badgeEl.textContent = 'ON (1)';
-      badgeEl.className = `px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-${colorName === 'red' ? 'rose' : colorName === 'blue' ? 'sky' : 'emerald'}-500/20 text-${colorName === 'red' ? 'rose' : colorName === 'blue' ? 'sky' : 'emerald'}-400 border border-${colorName === 'red' ? 'rose' : colorName === 'blue' ? 'sky' : 'emerald'}-500/40`;
-    } else {
-      bezelEl.className = 'led-bezel';
-      coreEl.className = `led-core led-${colorName} led-off`;
-      badgeEl.textContent = 'OFF (0)';
-      badgeEl.className = 'px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700';
+    ctx.clearRect(0, 0, width, height);
+
+    const cx = width / 2;
+    const cy = height - 12;
+    const radius = Math.min(cx, cy) - 14;
+    const lineWidth = 10;
+
+    // 1. Arco de Fondo (Track)
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, Math.PI, 0, false);
+    ctx.strokeStyle = '#18181c';
+    ctx.lineWidth = lineWidth;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    // 2. Zonas de Color Semicirculares (Escala de 0.00 a 1.00)
+    // Zona Roja (< 0.85): 0 a 85%
+    const arcStart = Math.PI;
+    const arcEnd = 0;
+    const totalAngle = Math.PI;
+
+    function getAngle(val) {
+      const clamped = Math.max(0.0, Math.min(1.0, val));
+      return Math.PI + clamped * totalAngle;
     }
 
-    // Barra de descarga RC y tiempo remanente
-    if (isLocked) {
-      const vRem = getEstimatedDischargeVoltage(idx);
-      lockTextEl.textContent = `Descargando: ${remSec.toFixed(1)}s (~${vRem.toFixed(1)}V)`;
-      lockTextEl.className = 'font-mono text-amber-400 text-xs font-semibold';
-      const pct = (remSec / (LOCK_TIME_MS / 1000.0)) * 100;
-      lockProgressEl.style.width = `${pct}%`;
-    } else {
-      lockTextEl.textContent = 'Descargado / Listo (0.0 V)';
-      lockTextEl.className = 'font-mono text-emerald-400 text-xs font-semibold';
-      lockProgressEl.style.width = '0%';
+    // Zona Roja (< 0.85)
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, getAngle(0.0), getAngle(0.85), false);
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = lineWidth;
+    ctx.lineCap = 'butt';
+    ctx.stroke();
+
+    // Zona Amarilla (0.85 - 0.95)
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, getAngle(0.85), getAngle(0.95), false);
+    ctx.strokeStyle = '#fbbf24';
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+
+    // Zona Verde Óptima [0.95 - 0.99] (Con brillo)
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, getAngle(0.95), getAngle(0.99), false);
+    ctx.strokeStyle = '#22c55e';
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+
+    // Zona Púrpura (> 0.99 o Capacitiva)
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, getAngle(0.99), getAngle(1.00), false);
+    ctx.strokeStyle = isCapacitive ? '#c084fc' : '#22d3ee';
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+
+    // 3. Ticks y Etiquetas Clave (0.2, 0.5, 0.85, 0.95, 1.0)
+    const tickValues = [0.2, 0.5, 0.85, 0.95, 1.0];
+    ctx.fillStyle = '#71717a';
+    ctx.font = '8.5px JetBrains Mono';
+    ctx.textAlign = 'center';
+
+    for (const tv of tickValues) {
+      const a = getAngle(tv);
+      const txInner = cx + (radius - 12) * Math.cos(a);
+      const tyInner = cy + (radius - 12) * Math.sin(a);
+      const txOuter = cx + (radius - 4) * Math.cos(a);
+      const tyOuter = cy + (radius - 4) * Math.sin(a);
+
+      ctx.beginPath();
+      ctx.moveTo(txInner, tyInner);
+      ctx.lineTo(txOuter, tyOuter);
+      ctx.strokeStyle = '#3f3f46';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      const labelX = cx + (radius - 22) * Math.cos(a);
+      const labelY = cy + (radius - 22) * Math.sin(a) + 3;
+      ctx.fillText(tv.toFixed(2), labelX, labelY);
     }
 
-    // Botón de control manual
-    btnEl.disabled = (state.isAutoControl || isLocked);
-    if (state.isAutoControl) {
-      btnEl.title = 'Inhibido: El control automático está activo.';
-    } else if (isLocked) {
-      btnEl.title = `Inhibido por seguridad: Restan ${remSec.toFixed(1)} s de descarga RC.`;
-    } else {
-      btnEl.title = 'Clic para conmutar paso.';
-    }
+    // 4. Aguja Indicadora (Needle)
+    const needleAngle = getAngle(fpVal);
+    const needleLength = radius - 8;
+    const nx = cx + needleLength * Math.cos(needleAngle);
+    const ny = cy + needleLength * Math.sin(needleAngle);
+
+    // Color de la aguja según estado
+    const needleColor = isCapacitive
+      ? '#c084fc'
+      : (fpVal >= 0.95 && fpVal <= 0.99)
+        ? '#22c55e'
+        : (fpVal >= 0.85)
+          ? '#fbbf24'
+          : '#ef4444';
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(nx, ny);
+    ctx.strokeStyle = needleColor;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    // Pivote central
+    ctx.beginPath();
+    ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+    ctx.fillStyle = needleColor;
+    ctx.fill();
+    ctx.strokeStyle = '#09090b';
+    ctx.lineWidth = 2;
+    ctx.stroke();
   }
 
-  /**
-   * Resuelve y muestra paso a paso las fórmulas de la rúbrica con los números actuales.
-   */
-  function updateMathFormulas() {
+  // ==========================================================================
+  // MEMORIA DE CÁLCULO EN VIVO & TABLA DE VERDAD
+  // ==========================================================================
+
+  function updateMathMemo() {
     const t = state.telemetry;
+    dom.mathMemoVrms.textContent = `= √( (1/320) · ${(t.vRms * t.vRms * 320).toFixed(0)} ) = ${t.vRms.toFixed(2)} V`;
+    dom.mathMemoIrms.textContent = `= √( (1/320) · ${(t.iRms * t.iRms * 320).toFixed(1)} ) = ${t.iRms.toFixed(2)} A`;
+    dom.mathMemoP.textContent = `${t.pAct.toFixed(1)} W`;
+    dom.mathMemoS.textContent = `${t.sApp.toFixed(1)} VA`;
+    dom.mathMemoFP.textContent = `${t.fp.toFixed(3)}`;
 
-    // Bloque 1
-    dom.calcVrmsStep.textContent = `= √( (1/320) · ${(t.vRms * t.vRms * 320).toFixed(0)} ) = ${t.vRms.toFixed(2)} V`;
-    dom.calcIrmsStep.textContent = `= √( (1/320) · ${(t.iRms * t.iRms * 320).toFixed(1)} ) = ${t.iRms.toFixed(2)} A`;
-    dom.calcPVal.textContent = `${t.pAct.toFixed(1)} W`;
-    dom.calcSVal.textContent = `${t.sApp.toFixed(1)} VA`;
-    dom.calcFPVal.textContent = `${t.fp.toFixed(3)}`;
+    dom.mathMemoQ.textContent = `${t.qRea >= 0 ? '+' : ''}${t.qRea.toFixed(1)} VAR (${t.isCapacitive ? 'ADELANTO' : 'ATRASO'})`;
+    dom.mathMemoPhi.textContent = `${t.phiDeg.toFixed(1)}°`;
+    dom.mathMemoDt.textContent = `${t.deltaTMs.toFixed(2)} ms`;
 
-    // Bloque 2
-    if (t.isCapacitive) {
-      dom.calcQSignBadge.textContent = `${t.qRea.toFixed(1)} VAR (ADELANTO / SOBRECOMPENSADO)`;
-      dom.calcQSignBadge.className = 'px-2 py-0.5 rounded text-[11px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30';
-    } else {
-      dom.calcQSignBadge.textContent = `+${t.qRea.toFixed(1)} VAR (ATRASO / INDUCTIVO)`;
-      dom.calcQSignBadge.className = 'px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30';
-    }
-    dom.calcPhiVal.textContent = `${t.phiDeg.toFixed(1)}°`;
-    dom.calcDtVal.textContent = `${t.deltaTMs.toFixed(2)} ms`;
-
-    // Bloque 3
-    const phi1Rad = Math.acos(Math.min(1.0, t.fp));
-    const tanPhi1 = Math.tan(phi1Rad);
-    dom.calcQcReqStep.textContent = `Q_C = ${t.pAct.toFixed(1)} · (${tanPhi1.toFixed(3)} - 0.251) = ${t.qcReq.toFixed(1)} VAR`;
-    dom.calcCReqVal.textContent = `${t.cReqUF.toFixed(1)} µF`;
-    dom.valFPTeo.textContent = `${t.fpTeorico.toFixed(3)}`;
-
-    const err = t.errorPct;
-    dom.badgeErrorPct.textContent = `Error: ${err.toFixed(2)}% (${err < 2.0 ? 'Excelente < 2%' : 'Aceptable < 5%'})`;
+    dom.mathMemoQcReq.textContent = `Q_C = ${t.qcReq.toFixed(1)} VAR (Meta FP=0.97)`;
+    dom.mathMemoCReq.textContent = `${t.cReqUF.toFixed(1)} µF`;
+    dom.mathMemoFPTeo.textContent = `${t.fpTeorico.toFixed(3)}`;
+    dom.mathMemoErrorBadge.textContent = `Error: ${t.errorPct.toFixed(2)}%`;
   }
 
-  /**
-   * Genera y actualiza la tabla de las 8 combinaciones de capacitores (000 a 111).
-   */
   function updateTruthTable(activeStepDec) {
     if (!dom.truthTableBody) return;
 
     let html = '';
     const v = state.telemetry.vRms || 120.0;
-    const p = state.telemetry.pAct || 588.0;
+    const p = state.telemetry.pAct || 130.0;
     const qMotor = (state.mode === 'sim') ? state.simMotor.q : (state.telemetry.qRea + state.telemetry.qInjected);
 
     for (let i = 0; i < 8; i++) {
-      const b0 = (i & 1) ? 1 : 0; // Paso 1 (15 uF)
-      const b1 = (i & 2) ? 1 : 0; // Paso 2 (30 uF)
-      const b2 = (i & 4) ? 1 : 0; // Paso 3 (60 uF)
+      const b0 = (i & 1) ? 1 : 0;
+      const b1 = (i & 2) ? 1 : 0;
+      const b2 = (i & 4) ? 1 : 0;
 
       const cTot = (b0 * 15.0) + (b1 * 30.0) + (b2 * 60.0);
       const qInj = OMEGA * (cTot * 1e-6) * (v * v);
@@ -977,30 +1145,26 @@
       if (fpEst > 1.0) fpEst = 1.0;
 
       const isActive = (i === activeStepDec);
-      const rowClass = isActive ? 'active-row font-bold text-white' : 'hover:bg-slate-900/40';
-
-      const isCapacitiveRes = (qRes < -5.0);
-      const fpColorClass = isCapacitiveRes ? 'text-purple-400' : (fpEst >= 0.95 ? 'text-emerald-400 font-bold' : 'text-slate-400');
+      const rowBg = isActive ? 'bg-cyan-950/30 font-bold border-l-2 border-l-cyan-400' : 'hover:bg-scada-900/60';
+      const fpColor = (qRes < -5.0) ? 'text-purple-400' : (fpEst >= 0.950 ? 'text-emerald-400 font-bold' : 'text-slate-400');
 
       html += `
-        <tr class="${rowClass} transition">
+        <tr class="${rowBg} transition">
           <td class="py-2 px-3 flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full ${isActive ? 'bg-sky-400 animate-ping' : 'bg-slate-700'}"></span>
+            <span class="w-1.5 h-1.5 rounded-full ${isActive ? 'bg-cyan-400 animate-ping' : 'bg-slate-700'}"></span>
             <span>Paso ${i} [${b0}, ${b1}, ${b2}]</span>
           </td>
-          <td class="py-2 px-3 text-red-400">${b0 ? 'ON (15 µF)' : '0'}</td>
-          <td class="py-2 px-3 text-blue-400">${b1 ? 'ON (30 µF)' : '0'}</td>
-          <td class="py-2 px-3 text-emerald-400">${b2 ? 'ON (60 µF)' : '0'}</td>
-          <td class="py-2 px-3 font-semibold text-slate-200">${cTot.toFixed(0)} µF</td>
-          <td class="py-2 px-3 text-sky-400">${qInj.toFixed(1)} VAR</td>
-          <td class="py-2 px-3 ${fpColorClass}">
-            ${fpEst.toFixed(3)} ${isCapacitiveRes ? '(Capacitivo)' : (fpEst >= 0.95 ? '★ Meta' : '')}
-          </td>
+          <td class="py-2 px-3 text-red-400">${b0 ? '15 µF' : '—'}</td>
+          <td class="py-2 px-3 text-blue-400">${b1 ? '30 µF' : '—'}</td>
+          <td class="py-2 px-3 text-emerald-400">${b2 ? '60 µF' : '—'}</td>
+          <td class="py-2 px-3 font-semibold text-white">${cTot.toFixed(0)} µF</td>
+          <td class="py-2 px-3 text-cyan-400">${qInj.toFixed(1)} VAR</td>
+          <td class="py-2 px-3 ${fpColor}">${fpEst.toFixed(3)} ${fpEst >= 0.95 ? '★' : ''}</td>
           <td class="py-2 px-3 text-center">
             ${isActive ? '<span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">ACTIVA</span>' : '<span class="text-slate-600">—</span>'}
           </td>
           <td class="py-2 px-3 text-right">
-            <button onclick="window.selectCombination(${i})" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[10px] transition disabled:opacity-30 disabled:cursor-not-allowed" ${state.isAutoControl ? 'disabled' : ''}>
+            <button onclick="window.selectCombination(${i})" class="px-2 py-0.5 rounded bg-scada-850 hover:bg-scada-800 text-slate-300 border border-scada-700 text-[10px] transition disabled:opacity-30 disabled:cursor-not-allowed" ${state.isAutoControl ? 'disabled' : ''}>
               Activar
             </button>
           </td>
@@ -1010,19 +1174,14 @@
     dom.truthTableBody.innerHTML = html;
   }
 
-  // Hacer accesible la función de selección para los botones en la tabla
   window.selectCombination = function(code) {
     if (state.isAutoControl) {
       alert('Desactiva el Control Automático primero para seleccionar pasos manualmente.');
       return;
     }
-    const b0 = Boolean(code & 1);
-    const b1 = Boolean(code & 2);
-    const b2 = Boolean(code & 4);
-
-    setStep(0, b0);
-    setStep(1, b1);
-    setStep(2, b2);
+    setStep(0, Boolean(code & 1));
+    setStep(1, Boolean(code & 2));
+    setStep(2, Boolean(code & 4));
   };
 
   // ==========================================================================
@@ -1033,228 +1192,190 @@
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
 
-    function resizeCanvas() {
+    function resize() {
       const rect = canvas.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
       canvas.width = rect.width * dpr;
       canvas.height = rect.height * dpr;
       ctx.scale(dpr, dpr);
     }
-    window.addEventListener('resize', resizeCanvas);
-    resizeCanvas();
+    window.addEventListener('resize', resize);
+    resize();
 
-    // Ciclo de animación
-    let lastAnimTime = performance.now();
+    let lastTime = performance.now();
 
-    function renderScope(now) {
-      requestAnimationFrame(renderScope);
-      const dt = (now - lastAnimTime) / 1000.0;
-      lastAnimTime = now;
+    function render(now) {
+      requestAnimationFrame(render);
+      const dt = (now - lastTime) / 1000.0;
+      lastTime = now;
 
       if (!state.scope.paused) {
         state.scope.timeSec += dt;
       }
 
       const rect = canvas.getBoundingClientRect();
-      const width = rect.width;
-      const height = rect.height;
+      const w = rect.width;
+      const h = rect.height;
 
-      // 1. Limpiar pantalla de fósforo CRT
-      ctx.fillStyle = '#060a12';
-      ctx.fillRect(0, 0, width, height);
+      ctx.fillStyle = '#05070a';
+      ctx.fillRect(0, 0, w, h);
 
-      // 2. Dibujar retícula (Grid) clásica de osciloscopio
-      const divX = 10; // 10 divisiones horizontales
-      const divY = 8;  // 8 divisiones verticales
-      const stepX = width / divX;
-      const stepY = height / divY;
+      // Cuadrícula Tektronix
+      const divX = 10;
+      const divY = 8;
+      const stepX = w / divX;
+      const stepY = h / divY;
 
-      ctx.strokeStyle = '#152033';
+      ctx.strokeStyle = '#121824';
       ctx.lineWidth = 1;
-
-      // Líneas menores
       ctx.beginPath();
-      for (let x = 0; x <= width; x += stepX) {
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-      }
-      for (let y = 0; y <= height; y += stepY) {
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-      }
+      for (let x = 0; x <= w; x += stepX) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+      for (let y = 0; y <= h; y += stepY) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
       ctx.stroke();
 
-      // Ejes centrales con marcas de graduación (sub-ticks)
-      const midX = width / 2;
-      const midY = height / 2;
-      ctx.strokeStyle = '#22324e';
+      const midX = w / 2;
+      const midY = h / 2;
+      ctx.strokeStyle = '#1f2b3f';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.moveTo(0, midY); ctx.lineTo(width, midY);
-      ctx.moveTo(midX, 0); ctx.lineTo(midX, height);
+      ctx.moveTo(0, midY); ctx.lineTo(w, midY);
+      ctx.moveTo(midX, 0); ctx.lineTo(midX, h);
       ctx.stroke();
 
-      // Pequeñas subdivisiones en los ejes centrales
-      ctx.strokeStyle = '#32486d';
-      ctx.beginPath();
-      for (let x = 0; x <= width; x += stepX / 5) {
-        ctx.moveTo(x, midY - 3); ctx.lineTo(x, midY + 3);
-      }
-      for (let y = 0; y <= height; y += stepY / 5) {
-        ctx.moveTo(midX - 3, y); ctx.lineTo(midX + 3, y);
-      }
-      ctx.stroke();
+      const { vRms, iRms, phiDeg, deltaTMs, isMotorOff, isCapacitive } = state.telemetry;
+      const vPeak = isMotorOff ? 0 : Math.SQRT2 * vRms;
+      const iPeak = isMotorOff ? 0 : Math.SQRT2 * iRms;
+      const phiRad = isMotorOff ? 0 : phiDeg * (Math.PI / 180.0) * (isCapacitive ? -1 : 1);
 
-      // 3. Parámetros de señal instantáneos
-      const { vRms, iRms, phiDeg, deltaTMs } = state.telemetry;
-      const vPeak = Math.SQRT2 * vRms;
-      const iPeak = Math.SQRT2 * iRms;
-      const phiRad = phiDeg * (Math.PI / 180.0) * (state.telemetry.isCapacitive ? -1 : 1);
+      // Escalas de visualización
+      const vPixelsPerVolt = (h / 2) / 200.0;
+      // Auto-escalamiento inteligente para que picos de inrush (10-15A RMS -> hasta 22A pico) nunca se corten
+      const maxExpectedIPeak = Math.max(10.0, iPeak * 1.18);
+      const iPixelsPerAmp = ((h / 2) * 0.82) / maxExpectedIPeak;
 
-      // Escalas de visualización en píxeles
-      // Calibrar para que 170V pico ocupe ~3 divisiones verticales
-      const vPixelsPerVolt = (height / 2) / 200.0;
-      // Escala inteligente de corriente: si hay transitorio de arranque (picos 10-15A RMS -> hasta 21A pico),
-      // auto-ajusta la ganancia para que el pico quepa holgadamente dentro del 82% del espacio vertical sin saturar
-      const maxExpectedIPeak = Math.max(12.0, iPeak * 1.15);
-      const iPixelsPerAmp = ((height / 2) * 0.82) / maxExpectedIPeak;
-
-      // Mapear tiempo en X: 2 ms por división
-      const totalTimeSpanMs = divX * state.scope.timebaseMsDiv; // e.g. 20 ms (1.2 ciclos de 60Hz)
-      const msPerPixel = totalTimeSpanMs / width;
-
-      // 4. Dibujar Canal 1: Tensión v(t) [Amarillo Neón #facc15]
-      ctx.shadowBlur = 8;
-      ctx.shadowColor = '#facc15';
-      ctx.strokeStyle = '#facc15';
-      ctx.lineWidth = 2.0;
-      ctx.beginPath();
-
+      const totalTimeSpanMs = divX * state.scope.timebaseMsDiv;
+      const msPerPixel = totalTimeSpanMs / w;
       const timeOffset = state.scope.timeSec;
 
-      for (let px = 0; px < width; px++) {
-        const tMs = px * msPerPixel;
-        const tSec = (tMs / 1000.0) + (timeOffset * 0.05); // Desplazamiento visual suave
-        const angle = OMEGA * tSec;
-        const vInst = vPeak * Math.sin(angle);
-        const py = midY - (vInst * vPixelsPerVolt);
-
-        if (px === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      }
-      ctx.stroke();
-
-      // 5. Dibujar Canal 2: Corriente i(t) [Cian Eléctrico #06b6d4]
-      ctx.shadowBlur = 8;
-      ctx.shadowColor = '#06b6d4';
-      ctx.strokeStyle = '#06b6d4';
-      ctx.lineWidth = 2.0;
+      // Canal 1: Tensión v(t) [Amarillo #FACC15]
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 1.8;
       ctx.beginPath();
-
-      for (let px = 0; px < width; px++) {
-        const tMs = px * msPerPixel;
-        const tSec = (tMs / 1000.0) + (timeOffset * 0.05);
-        // Cuando hay desfase inductivo, i(t) retrasa a v(t) -> sin(omega*t - phi)
-        const angle = OMEGA * tSec - phiRad;
-        const iInst = iPeak * Math.sin(angle);
-        const py = midY - (iInst * iPixelsPerAmp);
-
+      for (let px = 0; px < w; px++) {
+        const tSec = (px * msPerPixel / 1000.0) + (timeOffset * 0.05);
+        const vInst = vPeak * Math.sin(OMEGA * tSec);
+        const py = midY - (vInst * vPixelsPerVolt);
         if (px === 0) ctx.moveTo(px, py);
         else ctx.lineTo(px, py);
       }
       ctx.stroke();
 
-      // Desactivar sombras
-      ctx.shadowBlur = 0;
+      // Canal 2: Corriente i(t) [Cian #22D3EE]
+      ctx.strokeStyle = '#22d3ee';
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      for (let px = 0; px < w; px++) {
+        const tSec = (px * msPerPixel / 1000.0) + (timeOffset * 0.05);
+        const iInst = iPeak * Math.sin(OMEGA * tSec - phiRad);
+        const py = midY - (iInst * iPixelsPerAmp);
+        if (px === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
 
-      // 6. Actualizar mediciones HUD en pantalla
+      // HUD Metrics
       dom.hudVpp.textContent = `${(vPeak * 2).toFixed(1)} Vp-p`;
       const isSurge = (iRms >= 9.5);
-      dom.hudIpp.textContent = `${(iPeak * 2).toFixed(1)} Ap-p (${iRms.toFixed(2)} Arms) ${isSurge ? '⚡ [PICO INRUSH]' : ''}`;
-      dom.hudPhi.textContent = `${phiDeg.toFixed(1)}° ${state.telemetry.isCapacitive ? '(Adelanto)' : '(Atraso)'}`;
+      dom.hudIpp.textContent = `${(iPeak * 2).toFixed(1)} Ap-p (${iRms.toFixed(2)} Arms) ${isSurge ? '⚡ [INRUSH]' : ''}`;
       dom.hudDt.textContent = `${deltaTMs.toFixed(2)} ms`;
+      dom.hudPhi.textContent = `${phiDeg.toFixed(1)}° ${isCapacitive ? '(Adelanto)' : '(Atraso)'}`;
     }
 
-    requestAnimationFrame(renderScope);
+    requestAnimationFrame(render);
   }
 
   // ==========================================================================
-  // TRIÁNGULO DE POTENCIAS & FASOR EN TIEMPO REAL (CANVAS)
+  // TRIÁNGULO DE POTENCIAS (PLANO COMPLEJO FASORIAL)
   // ==========================================================================
   function setupPowerTriangle() {
     const canvas = dom.triangleCanvas;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
 
-    function resizeCanvas() {
+    function resize() {
       const rect = canvas.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
       canvas.width = rect.width * dpr;
       canvas.height = rect.height * dpr;
       ctx.scale(dpr, dpr);
     }
-    window.addEventListener('resize', resizeCanvas);
-    resizeCanvas();
+    window.addEventListener('resize', resize);
+    resize();
 
-    function renderTriangle() {
-      requestAnimationFrame(renderTriangle);
+    function render() {
+      requestAnimationFrame(render);
 
       const rect = canvas.getBoundingClientRect();
-      const width = rect.width;
-      const height = rect.height;
+      const w = rect.width;
+      const h = rect.height;
 
-      ctx.fillStyle = '#070d18';
-      ctx.fillRect(0, 0, width, height);
+      ctx.fillStyle = '#05070a';
+      ctx.fillRect(0, 0, w, h);
 
-      // Origen del plano complejo de potencias
-      const originX = width * 0.15;
-      const originY = height * 0.65;
+      const originX = w * 0.16;
+      const originY = h * 0.65;
 
-      const pVal = state.telemetry.pAct || 588.0;
-      const qVal = state.telemetry.qRea || 744.0;
+      const pVal = state.telemetry.pAct || 130.0;
+      const qVal = state.telemetry.qRea || 30.0;
       const qMotor = (state.mode === 'sim') ? state.simMotor.q : (state.telemetry.qRea + state.telemetry.qInjected);
       const qInjected = state.telemetry.qInjected || 0.0;
 
-      // Escalas de dibujo (máximo ~1000 W/VAR)
-      const maxVal = 1050.0;
-      const scaleX = (width * 0.70) / maxVal;
-      const scaleY = (height * 0.50) / maxVal;
+      const maxVal = 1000.0;
+      const scaleX = (w * 0.68) / maxVal;
+      const scaleY = (h * 0.52) / maxVal;
 
       const pPx = pVal * scaleX;
       const qMotorPx = qMotor * scaleY;
       const qNetPx = qVal * scaleY;
       const qInjPx = qInjected * scaleY;
 
-      // 1. Ejes coordenados P (Real) y Q (Imaginario)
-      ctx.strokeStyle = '#1e293b';
+      // Ejes P y Q
+      ctx.strokeStyle = '#1a2230';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(originX - 20, originY); ctx.lineTo(width - 20, originY); // Eje P
-      ctx.moveTo(originX, 20); ctx.lineTo(originX, height - 20); // Eje Q
+      ctx.moveTo(originX - 15, originY); ctx.lineTo(w - 20, originY);
+      ctx.moveTo(originX, 15); ctx.lineTo(originX, h - 15);
       ctx.stroke();
 
       ctx.fillStyle = '#64748b';
-      ctx.font = '10px JetBrains Mono';
-      ctx.fillText('+P (kW / W)', width - 75, originY - 8);
-      ctx.fillText('+Q (Inductivo)', originX + 8, 30);
-      ctx.fillText('-Q (Capacitivo)', originX + 8, height - 25);
+      ctx.font = '9px JetBrains Mono';
+      ctx.fillText('+P (W)', w - 45, originY - 6);
+      ctx.fillText('+Q (Ind)', originX + 6, 25);
+      ctx.fillText('-Q (Cap)', originX + 6, h - 18);
 
-      // 2. Vector Potencia Activa P (Eje horizontal verde esmeralda)
-      ctx.strokeStyle = '#10b981';
-      ctx.lineWidth = 3;
+      if (state.telemetry.isMotorOff) {
+        ctx.fillStyle = '#71717a';
+        ctx.font = '11px JetBrains Mono';
+        ctx.textAlign = 'center';
+        ctx.fillText('MOTOR APAGADO — VECTORES EN REPOSO', w / 2, h / 2);
+        return;
+      }
+
+      // 1. Vector Potencia Activa P (Verde esmeralda horizontal)
+      ctx.strokeStyle = '#22c55e';
+      ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.moveTo(originX, originY);
       ctx.lineTo(originX + pPx, originY);
       ctx.stroke();
-      drawArrowHead(ctx, originX, originY, originX + pPx, originY, '#10b981');
 
-      ctx.fillStyle = '#34d399';
-      ctx.fillText(`P = ${pVal.toFixed(0)} W`, originX + (pPx / 2) - 25, originY + 16);
+      ctx.fillStyle = '#4ade80';
+      ctx.fillText(`P = ${pVal.toFixed(0)} W`, originX + (pPx / 2) - 20, originY + 14);
 
-      // 3. Vector Reactiva Motor Inicial Q_L (Línea punteada naranja hacia arriba)
+      // 2. Vector Q_motor original (Línea punteada naranja)
       ctx.strokeStyle = '#f59e0b';
-      ctx.setLineDash([4, 4]);
-      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(originX + pPx, originY);
       ctx.lineTo(originX + pPx, originY - qMotorPx);
@@ -1262,89 +1383,71 @@
       ctx.setLineDash([]);
 
       ctx.fillStyle = '#fbbf24';
-      ctx.fillText(`Q_motor = ${qMotor.toFixed(0)} VAR`, originX + pPx + 8, originY - (qMotorPx / 2));
+      ctx.fillText(`Q_mot = ${qMotor.toFixed(0)} VAR`, originX + pPx + 6, originY - (qMotorPx / 2));
 
-      // 4. Vector de Compensación Capacitiva Q_C (Flecha azul hacia abajo restando)
-      if (qInjPx > 5) {
+      // 3. Vector Q_C inyectado por capacitores (Flecha azul hacia abajo)
+      if (qInjPx > 4) {
         ctx.strokeStyle = '#38bdf8';
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.moveTo(originX + pPx + 15, originY - qMotorPx);
-        ctx.lineTo(originX + pPx + 15, originY - qMotorPx + qInjPx);
+        ctx.moveTo(originX + pPx + 10, originY - qMotorPx);
+        ctx.lineTo(originX + pPx + 10, originY - qMotorPx + qInjPx);
         ctx.stroke();
-        drawArrowHead(ctx, originX + pPx + 15, originY - qMotorPx, originX + pPx + 15, originY - qMotorPx + qInjPx, '#38bdf8');
 
         ctx.fillStyle = '#38bdf8';
-        ctx.fillText(`-Q_C = ${qInjected.toFixed(0)} VAR`, originX + pPx + 22, originY - qMotorPx + (qInjPx / 2));
+        ctx.fillText(`-Q_C = ${qInjected.toFixed(0)} VAR`, originX + pPx + 15, originY - qMotorPx + (qInjPx / 2));
       }
 
-      // 5. Vector Reactiva Neta Q_neta (Sólido ámbar/púrpura)
+      // 4. Vector Q_neta resultante
       ctx.strokeStyle = state.telemetry.isCapacitive ? '#c084fc' : '#eab308';
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.moveTo(originX + pPx, originY);
       ctx.lineTo(originX + pPx, originY - qNetPx);
       ctx.stroke();
 
-      // 6. Fasor Aparente Original S_1 (Línea punteada)
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.4)';
-      ctx.setLineDash([3, 3]);
-      ctx.lineWidth = 1.5;
+      // 5. Fasor S_1 sin compensar (Gris tenue punteado)
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+      ctx.setLineDash([2, 2]);
+      ctx.lineWidth = 1.2;
       ctx.beginPath();
       ctx.moveTo(originX, originY);
       ctx.lineTo(originX + pPx, originY - qMotorPx);
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // 7. Fasor Aparente Resultante S_2 (Línea sólida esmeralda/cian destacada)
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 2.5;
+      // 6. Fasor S_2 compensado actual (Cian sólido brillante)
+      ctx.strokeStyle = '#22d3ee';
+      ctx.lineWidth = 2.2;
       ctx.beginPath();
       ctx.moveTo(originX, originY);
       ctx.lineTo(originX + pPx, originY - qNetPx);
       ctx.stroke();
-      drawArrowHead(ctx, originX, originY, originX + pPx, originY - qNetPx, '#38bdf8');
 
       // Arco del ángulo phi resultante
       const phiRad = state.telemetry.phiDeg * (Math.PI / 180.0);
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#22d3ee';
+      ctx.lineWidth = 1.2;
       ctx.beginPath();
-      ctx.arc(originX, originY, 35, 0, -phiRad, true);
+      ctx.arc(originX, originY, 28, 0, -phiRad, true);
       ctx.stroke();
 
-      ctx.fillStyle = '#38bdf8';
-      ctx.fillText(`φ = ${state.telemetry.phiDeg.toFixed(1)}°`, originX + 42, originY - 10);
+      ctx.fillStyle = '#22d3ee';
+      ctx.fillText(`φ = ${state.telemetry.phiDeg.toFixed(1)}°`, originX + 34, originY - 6);
 
-      // Actualizar tarjeta inferior del triángulo
+      // Textos inferiores
       const s1 = Math.sqrt(pVal * pVal + qMotor * qMotor);
-      dom.triS1.textContent = `${s1.toFixed(0)}`;
-      dom.triQL.textContent = `${qMotor.toFixed(0)}`;
-      dom.triS2.textContent = `${state.telemetry.sApp.toFixed(0)}`;
-      dom.triQnet.textContent = `${state.telemetry.qRea.toFixed(0)}`;
-      dom.triFP.textContent = `FP ${state.telemetry.fp.toFixed(3)}`;
+      dom.triS1.textContent = `${s1.toFixed(0)} VA (FP ${(pVal / s1).toFixed(3)})`;
+      dom.triS2.textContent = `${state.telemetry.sApp.toFixed(0)} VA (FP ${state.telemetry.fp.toFixed(3)})`;
     }
 
-    function drawArrowHead(ctx, fromX, fromY, toX, toY, color) {
-      const headLength = 10;
-      const dx = toX - fromX;
-      const dy = toY - fromY;
-      const angle = Math.atan2(dy, dx);
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.moveTo(toX, toY);
-      ctx.lineTo(toX - headLength * Math.cos(angle - Math.PI / 6), toY - headLength * Math.sin(angle - Math.PI / 6));
-      ctx.lineTo(toX - headLength * Math.cos(angle + Math.PI / 6), toY - headLength * Math.sin(angle + Math.PI / 6));
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    requestAnimationFrame(renderTriangle);
+    requestAnimationFrame(render);
   }
 
   // ==========================================================================
   // REGISTRO DE TELEMETRÍA Y EXPORTACIÓN CSV
   // ==========================================================================
+
   function recordTelemetryHistory() {
     const t = state.telemetry;
     const now = new Date();
@@ -1353,6 +1456,7 @@
     const entry = {
       timestamp: timeStr,
       isoDate: now.toISOString(),
+      source: (state.mode === 'serial') ? 'ARDUINO NANO' : 'SIMULADO',
       vRms: t.vRms,
       iRms: t.iRms,
       pAct: t.pAct,
@@ -1360,46 +1464,45 @@
       sApp: t.sApp,
       fp: t.fp,
       cTotalUF: t.cTotalUF,
-      steps: [state.stepState[0] ? 1 : 0, state.stepState[1] ? 1 : 0, state.stepState[2] ? 1 : 0],
-      isCap: t.isCapacitive ? 1 : 0,
-      errorPct: t.errorPct
+      steps: [state.stepState[0] ? 1 : 0, state.stepState[1] ? 1 : 0, state.stepState[2] ? 1 : 0]
     };
 
     state.telemetryHistory.unshift(entry);
-    if (state.telemetryHistory.length > state.maxHistorySize) {
-      state.telemetryHistory.pop();
-    }
+    if (state.telemetryHistory.length > state.maxHistorySize) state.telemetryHistory.pop();
 
-    dom.recordCountBadge.textContent = `${state.telemetryHistory.length} registros`;
+    if (dom.recordCountBadge) dom.recordCountBadge.textContent = `${state.telemetryHistory.length} registros`;
 
-    // Renderizar las últimas 8 muestras en la tabla
-    let html = '';
-    const displaySamples = state.telemetryHistory.slice(0, 8);
-    for (const s of displaySamples) {
-      html += `
-        <tr class="hover:bg-slate-900/60">
-          <td class="py-1.5 px-2 text-slate-400">${s.timestamp}</td>
-          <td class="py-1.5 px-2 text-yellow-400">${s.vRms.toFixed(1)}</td>
-          <td class="py-1.5 px-2 text-cyan-400">${s.iRms.toFixed(2)}</td>
-          <td class="py-1.5 px-2 text-slate-200">${s.pAct.toFixed(1)}</td>
-          <td class="py-1.5 px-2 text-amber-400">${s.qRea.toFixed(1)}</td>
-          <td class="py-1.5 px-2 ${s.fp >= 0.95 ? 'text-emerald-400 font-bold' : 'text-slate-300'}">${s.fp.toFixed(3)}</td>
-          <td class="py-1.5 px-2 text-sky-400">${s.cTotalUF.toFixed(0)}</td>
-          <td class="py-1.5 px-2 font-mono text-slate-400">[${s.steps.join(',')}]</td>
-        </tr>
-      `;
+    // Renderizar últimas 10 filas
+    if (dom.telemetryTableBody) {
+      let html = '';
+      for (const s of state.telemetryHistory.slice(0, 10)) {
+        html += `
+          <tr class="hover:bg-scada-900/60">
+            <td class="py-1 px-2 text-slate-400">${s.timestamp}</td>
+            <td class="py-1 px-2 text-cyan-400 font-semibold">${s.source}</td>
+            <td class="py-1 px-2 text-yellow-400">${s.vRms.toFixed(1)}</td>
+            <td class="py-1 px-2 text-cyan-300">${s.iRms.toFixed(2)}</td>
+            <td class="py-1 px-2 text-white">${s.pAct.toFixed(1)}</td>
+            <td class="py-1 px-2 text-amber-400">${s.qRea.toFixed(1)}</td>
+            <td class="py-1 px-2 ${s.fp >= 0.95 ? 'text-emerald-400 font-bold' : 'text-slate-300'}">${s.fp.toFixed(3)}</td>
+            <td class="py-1 px-2 text-cyan-400">${s.cTotalUF.toFixed(0)}</td>
+            <td class="py-1 px-2 text-slate-400 font-mono">[${s.steps.join(',')}]</td>
+          </tr>
+        `;
+      }
+      dom.telemetryTableBody.innerHTML = html;
     }
-    dom.telemetryTableBody.innerHTML = html;
   }
 
   function exportCSV() {
     if (state.telemetryHistory.length === 0) {
-      alert('No hay registros de telemetría en el buffer para exportar.');
+      alert('No hay registros en el buffer para exportar.');
       return;
     }
 
     const headers = [
       'iso_timestamp',
+      'origen_dato',
       'v_rms_v',
       'i_rms_a',
       'potencia_activa_p_w',
@@ -1407,20 +1510,17 @@
       'potencia_aparente_s_va',
       'factor_de_potencia_fp',
       'capacitancia_total_uf',
-      'step1_rojo_15uf',
-      'step2_azul_30uf',
-      'step3_verde_60uf',
-      'es_capacitivo',
-      'error_experimental_pct'
+      'step1_d4_15uf',
+      'step2_d5_30uf',
+      'step3_d6_60uf'
     ];
 
-    let csvContent = headers.join(',') + '\n';
-
-    // Orden cronológico (antiguo a reciente)
-    const reversedHistory = [...state.telemetryHistory].reverse();
-    for (const r of reversedHistory) {
-      const row = [
+    let csv = headers.join(',') + '\n';
+    const reversed = [...state.telemetryHistory].reverse();
+    for (const r of reversed) {
+      csv += [
         r.isoDate,
+        r.source,
         r.vRms.toFixed(2),
         r.iRms.toFixed(3),
         r.pAct.toFixed(2),
@@ -1430,29 +1530,24 @@
         r.cTotalUF.toFixed(1),
         r.steps[0],
         r.steps[1],
-        r.steps[2],
-        r.isCap,
-        r.errorPct.toFixed(2)
-      ];
-      csvContent += row.join(',') + '\n';
+        r.steps[2]
+      ].join(',') + '\n';
     }
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     const timestampStr = new Date().toISOString().replace(/[:.]/g, '-');
     link.setAttribute('href', url);
-    link.setAttribute('download', `POWERGuard5_Mediciones_${timestampStr}.csv`);
+    link.setAttribute('download', `POWERGuard5_SCADA_${timestampStr}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
 
-    logTerminal(`[CSV] Archivo descargado con ${reversedHistory.length} lecturas.`);
+    logTerminal(`[CSV] Archivo descargado con ${reversed.length} lecturas.`);
+    addAlarm('INFORMATIVA', `Archivo CSV exportado con ${reversed.length} muestras de telemetría.`, 'Guardado para informe técnico');
   }
 
-  // ==========================================================================
-  // CONSOLA TERMINAL SERIE
-  // ==========================================================================
   function logTerminal(msg) {
     if (!dom.terminalOutput) return;
     const time = new Date().toTimeString().split(' ')[0];
@@ -1463,57 +1558,99 @@
   // ==========================================================================
   // INICIALIZACIÓN Y EVENT LISTENERS
   // ==========================================================================
+
   function initEventListeners() {
-    // 1. Selector Auto / Manual
-    dom.toggleAutoBtn.addEventListener('click', () => {
-      state.isAutoControl = !state.isAutoControl;
-      if (state.isAutoControl) {
-        dom.autoIndicatorDot.className = 'w-2 h-2 rounded-full bg-sky-400 animate-pulse';
-        dom.autoBtnText.textContent = 'Control Automático (0.95 - 0.99)';
-        dom.toggleAutoBtn.classList.replace('border-amber-700', 'border-slate-700');
-        logTerminal('[MODO] Control Automático Activado (Banda de Histéresis: 0.95 a 0.99).');
-      } else {
-        dom.autoIndicatorDot.className = 'w-2 h-2 rounded-full bg-amber-400';
-        dom.autoBtnText.textContent = 'Control Manual Habilitado';
-        dom.toggleAutoBtn.classList.replace('border-slate-700', 'border-amber-700');
-        logTerminal('[MODO] Control Manual Habilitado (Pulsadores físicos y botones de paso activos).');
+    // 1. Navegación por pestañas
+    function switchTab(targetId) {
+      [dom.tabMonitor, dom.tabEngineering, dom.tabHistory].forEach(t => {
+        if (t) t.classList.remove('active');
+      });
+      [dom.tabBtnMonitor, dom.tabBtnEngineering, dom.tabBtnHistory].forEach(b => {
+        if (b) {
+          b.classList.remove('bg-scada-800', 'border-scada-600', 'text-white', 'shadow-sm');
+          b.classList.add('text-slate-400');
+        }
+      });
+
+      const activeTab = document.getElementById(targetId);
+      if (activeTab) activeTab.classList.add('active');
+
+      if (targetId === 'tabMonitor') {
+        dom.tabBtnMonitor.classList.add('bg-scada-800', 'border-scada-600', 'text-white', 'shadow-sm');
+      } else if (targetId === 'tabEngineering') {
+        dom.tabBtnEngineering.classList.add('bg-scada-800', 'border-scada-600', 'text-white', 'shadow-sm');
+      } else if (targetId === 'tabHistory') {
+        dom.tabBtnHistory.classList.add('bg-scada-800', 'border-scada-600', 'text-white', 'shadow-sm');
       }
-      updateUI();
-    });
+    }
 
-    // 2. Conectar Arduino USB
-    dom.btnConnectSerial.addEventListener('click', () => {
-      connectSerial();
-    });
+    if (dom.tabBtnMonitor) dom.tabBtnMonitor.addEventListener('click', () => switchTab('tabMonitor'));
+    if (dom.tabBtnEngineering) dom.tabBtnEngineering.addEventListener('click', () => switchTab('tabEngineering'));
+    if (dom.tabBtnHistory) dom.tabBtnHistory.addEventListener('click', () => switchTab('tabHistory'));
 
-    // 3. Botones de Cargas del Motor WEG & Transitorio Inrush
+    // 2. Control Automático / Manual
+    if (dom.toggleAutoBtn) {
+      dom.toggleAutoBtn.addEventListener('click', () => {
+        state.isAutoControl = !state.isAutoControl;
+        if (state.isAutoControl) {
+          dom.autoIndicatorDot.className = 'w-2 h-2 rounded-full bg-cyan-400 animate-pulse';
+          dom.autoBtnText.textContent = 'AUTO';
+          logTerminal('[CONTROL] Modo AUTOMÁTICO activo (Banda 0.950 – 0.990).');
+          addAlarm('INFORMATIVA', 'Modo de control automático activado.', 'El lazo seleccionará los pasos automáticamente');
+        } else {
+          dom.autoIndicatorDot.className = 'w-2 h-2 rounded-full bg-amber-400';
+          dom.autoBtnText.textContent = 'MANUAL';
+          logTerminal('[CONTROL] Modo MANUAL habilitado (Pulsadores activos).');
+          addAlarm('ADVERTENCIA', 'Control manual habilitado.', 'El usuario controla la conmutación de pasos');
+        }
+        updateUI();
+      });
+    }
+
+    // 3. Conexión Web Serial
+    if (dom.btnConnectSerial) dom.btnConnectSerial.addEventListener('click', connectSerial);
+
+    // 4. Modo Presentación (Zen Mode)
+    if (dom.btnTogglePresentation) {
+      dom.btnTogglePresentation.addEventListener('click', () => {
+        state.presentationMode = !state.presentationMode;
+        if (state.presentationMode) {
+          document.body.classList.add('presentation-mode');
+          logTerminal('[HMI] Modo Presentación Activado.');
+        } else {
+          document.body.classList.remove('presentation-mode');
+          logTerminal('[HMI] Modo Presentación Desactivado.');
+        }
+      });
+    }
+
+    // 5. Presets del Motor WEG
     function setMotorPreset(key) {
       const prevKey = state.motorPresetKey;
       state.motorPresetKey = key;
       state.simMotor = { ...MOTOR_PRESETS[key] };
 
-      [dom.btnLoadEmpty, dom.btnLoadMid, dom.btnLoadFull, dom.btnLoadOff].forEach(btn => {
-        if (!btn) return;
-        btn.classList.remove('bg-slate-800', 'text-slate-200', 'font-medium', 'bg-rose-900/40', 'bg-emerald-950/60', 'text-emerald-300', 'border-emerald-500/40');
-        btn.classList.add('text-slate-400');
+      [dom.btnLoadEmpty, dom.btnLoadMid, dom.btnLoadFull, dom.btnLoadOff].forEach(b => {
+        if (!b) return;
+        b.classList.remove('bg-emerald-950/60', 'text-emerald-300', 'border-emerald-500/40', 'bg-scada-800', 'text-white', 'bg-rose-950/40', 'text-rose-300');
+        b.classList.add('text-slate-400');
       });
 
       if (key === 'empty') {
-        dom.btnLoadEmpty.classList.add('bg-emerald-950/60', 'text-emerald-300', 'border-emerald-500/40', 'font-medium');
+        dom.btnLoadEmpty.classList.add('bg-emerald-950/60', 'text-emerald-300', 'border-emerald-500/40');
       } else if (key === 'mid') {
-        dom.btnLoadMid.classList.add('bg-slate-800', 'text-slate-200', 'font-medium');
+        dom.btnLoadMid.classList.add('bg-scada-800', 'text-white');
       } else if (key === 'full') {
-        dom.btnLoadFull.classList.add('bg-slate-800', 'text-slate-200', 'font-medium');
+        dom.btnLoadFull.classList.add('bg-scada-800', 'text-white');
       } else if (key === 'off') {
-        dom.btnLoadOff.classList.add('bg-rose-900/40', 'text-rose-200', 'font-medium');
+        dom.btnLoadOff.classList.add('bg-rose-950/40', 'text-rose-300');
       }
 
-      logTerminal(`[CARGA MOTOR] Seleccionado preset: ${MOTOR_PRESETS[key].label}`);
+      logTerminal(`[MOTOR] Seleccionado: ${MOTOR_PRESETS[key].label}`);
+      addAlarm('INFORMATIVA', `Estado de motor modificado: ${MOTOR_PRESETS[key].label}`, 'Supervisar reactiva');
 
-      // Si se pasa de OFF a cualquier marcha, disparar automáticamente el pico de arranque (10-15A)
-      if (prevKey === 'off' && key !== 'off') {
-        triggerInrushPeak();
-      }
+      // Si se enciende desde OFF, disparar inrush
+      if (prevKey === 'off' && key !== 'off') triggerInrushPeak();
     }
 
     if (dom.btnLoadEmpty) dom.btnLoadEmpty.addEventListener('click', () => setMotorPreset('empty'));
@@ -1521,84 +1658,94 @@
     if (dom.btnLoadFull) dom.btnLoadFull.addEventListener('click', () => setMotorPreset('full'));
     if (dom.btnLoadOff) dom.btnLoadOff.addEventListener('click', () => setMotorPreset('off'));
 
-    // Botón para simular pico de arranque (10-15 A)
-    if (dom.btnSimInrush) {
-      dom.btnSimInrush.addEventListener('click', () => {
-        triggerInrushPeak();
-      });
-    }
+    // Botón Inrush
+    if (dom.btnSimInrush) dom.btnSimInrush.addEventListener('click', triggerInrushPeak);
 
-    // Botón para reiniciar indicador Max-Hold de corriente
-    if (dom.btnResetPeak) {
-      dom.btnResetPeak.addEventListener('click', () => {
-        resetPeakCurrent();
-      });
-    }
+    // Reset Peak
+    if (dom.btnResetPeak) dom.btnResetPeak.addEventListener('click', resetPeakCurrent);
 
-    // 4. Botones rápidos de hardware
-    dom.btnSendTest.addEventListener('click', () => {
-      logTerminal('[COMANDO] Ejecutando test secuencial de LEDs (D4, D5, D6)...');
+    // Acciones rápidas
+    if (dom.btnSendTest) dom.btnSendTest.addEventListener('click', () => {
+      logTerminal('[COMANDO] Ejecutando test secuencial de LEDs...');
       sendSerialCommand('t');
-      // En modo simulación emular la secuencia
-      if (state.mode === 'sim') {
-        simulateLedTestSequence();
-      }
+      if (state.mode === 'sim') simulateLedTestSequence();
     });
 
-    dom.btnSendCalib.addEventListener('click', () => {
-      logTerminal('[COMANDO] Calibración de referencias virtuales VB 2.5V...');
+    if (dom.btnSendCalib) dom.btnSendCalib.addEventListener('click', () => {
+      logTerminal('[COMANDO] Calibrando referencias virtuales VB (2.5 V)...');
       sendSerialCommand('c');
+      addAlarm('INFORMATIVA', 'Calibración de tierra virtual VB ejecutada.', 'Offsets en reposo');
     });
 
-    dom.btnSendOff.addEventListener('click', () => {
-      turnOffAllSteps(true);
-    });
+    if (dom.btnSendOff) dom.btnSendOff.addEventListener('click', () => turnOffAllSteps(true));
 
-    dom.btnExportCSV.addEventListener('click', exportCSV);
+    // Conmutadores individuales del Banco 1:2:4
+    if (dom.btnStepToggle1) dom.btnStepToggle1.addEventListener('click', () => setStep(0, !state.stepState[0]));
+    if (dom.btnStepToggle2) dom.btnStepToggle2.addEventListener('click', () => setStep(1, !state.stepState[1]));
+    if (dom.btnStepToggle3) dom.btnStepToggle3.addEventListener('click', () => setStep(2, !state.stepState[2]));
 
-    // 5. Botones individuales de los 3 pasos LED
-    dom.btnToggleStep1.addEventListener('click', () => setStep(0, !state.stepState[0]));
-    dom.btnToggleStep2.addEventListener('click', () => setStep(1, !state.stepState[1]));
-    dom.btnToggleStep3.addEventListener('click', () => setStep(2, !state.stepState[2]));
+    // Pausa osciloscopio
+    if (dom.btnPauseScope) {
+      dom.btnPauseScope.addEventListener('click', () => {
+        state.scope.paused = !state.scope.paused;
+        dom.btnPauseScope.textContent = state.scope.paused ? 'Reanudar' : 'Pausa';
+      });
+    }
 
-    // 6. Controles de osciloscopio
-    dom.btnPauseScope.addEventListener('click', () => {
-      state.scope.paused = !state.scope.paused;
-      dom.btnPauseScope.textContent = state.scope.paused ? 'Reanudar' : 'Pausa';
-      dom.btnPauseScope.className = state.scope.paused ? 'px-2 py-0.5 rounded bg-emerald-800 text-emerald-200 text-[11px]' : 'px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[11px]';
-    });
+    // Exportación CSV
+    if (dom.btnQuickExportCSV) dom.btnQuickExportCSV.addEventListener('click', exportCSV);
+    if (dom.btnExportCSVTab) dom.btnExportCSVTab.addEventListener('click', exportCSV);
 
-    // 7. Acciones de telemetría y terminal
-    dom.btnClearTelemetry.addEventListener('click', () => {
-      state.telemetryHistory = [];
-      recordTelemetryHistory();
-    });
+    if (dom.btnClearTelemetry) {
+      dom.btnClearTelemetry.addEventListener('click', () => {
+        state.telemetryHistory = [];
+        recordTelemetryHistory();
+      });
+    }
 
-    dom.btnClearTerminal.addEventListener('click', () => {
-      dom.terminalOutput.textContent = '';
-    });
-
-    dom.termSendBtn.addEventListener('click', () => {
-      const cmd = dom.termInput.value.trim();
-      if (cmd) {
-        sendSerialCommand(cmd);
-        dom.termInput.value = '';
-      }
-    });
-
-    dom.termInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
+    // Terminal Serie
+    if (dom.btnClearTerminal) dom.btnClearTerminal.addEventListener('click', () => dom.terminalOutput.textContent = '');
+    if (dom.termSendBtn) {
+      dom.termSendBtn.addEventListener('click', () => {
         const cmd = dom.termInput.value.trim();
-        if (cmd) {
-          sendSerialCommand(cmd);
-          dom.termInput.value = '';
+        if (cmd) { sendSerialCommand(cmd); dom.termInput.value = ''; }
+      });
+    }
+    if (dom.termInput) {
+      dom.termInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          const cmd = dom.termInput.value.trim();
+          if (cmd) { sendSerialCommand(cmd); dom.termInput.value = ''; }
         }
-      }
-    });
+      });
+    }
 
-    // 8. Modal de Ficha Técnica
-    function toggleModal(show) {
-      if (show) {
+    // Panel Drawer de Alarmas
+    function toggleAlarmDrawer(open) {
+      if (open) {
+        dom.alarmDrawer.classList.add('open');
+        dom.alarmBackdrop.classList.add('open');
+      } else {
+        dom.alarmDrawer.classList.remove('open');
+        dom.alarmBackdrop.classList.remove('open');
+      }
+    }
+    if (dom.btnOpenAlarms) dom.btnOpenAlarms.addEventListener('click', () => toggleAlarmDrawer(true));
+    if (dom.btnFooterOpenAlarms) dom.btnFooterOpenAlarms.addEventListener('click', () => toggleAlarmDrawer(true));
+    if (dom.btnCloseAlarms) dom.btnCloseAlarms.addEventListener('click', () => toggleAlarmDrawer(false));
+    if (dom.alarmBackdrop) dom.alarmBackdrop.addEventListener('click', () => toggleAlarmDrawer(false));
+
+    if (dom.btnAckAllAlarms) {
+      dom.btnAckAllAlarms.addEventListener('click', () => {
+        state.alarms.forEach(a => a.acknowledged = true);
+        updateAlarmFeed();
+        logTerminal('[ALARMAS] Todas las alarmas han sido reconocidas.');
+      });
+    }
+
+    // Modal Docs
+    function toggleDocsModal(open) {
+      if (open) {
         dom.modalDocs.classList.remove('hidden');
         dom.modalDocs.classList.add('flex');
       } else {
@@ -1606,29 +1753,27 @@
         dom.modalDocs.classList.add('hidden');
       }
     }
-    dom.btnOpenDocs.addEventListener('click', () => toggleModal(true));
-    dom.btnCloseDocs.addEventListener('click', () => toggleModal(false));
-    dom.btnModalCloseAction.addEventListener('click', () => toggleModal(false));
-    dom.modalDocs.addEventListener('click', (e) => {
-      if (e.target === dom.modalDocs) toggleModal(false);
+    if (dom.btnOpenDocs) dom.btnOpenDocs.addEventListener('click', () => toggleDocsModal(true));
+    if (dom.btnCloseDocs) dom.btnCloseDocs.addEventListener('click', () => toggleDocsModal(false));
+    if (dom.btnModalCloseAction) dom.btnModalCloseAction.addEventListener('click', () => toggleDocsModal(false));
+    if (dom.modalDocs) dom.modalDocs.addEventListener('click', (e) => {
+      if (e.target === dom.modalDocs) toggleDocsModal(false);
     });
 
     // Atajos de teclado para laboratorio
     window.addEventListener('keydown', (e) => {
       if (document.activeElement === dom.termInput) return;
       if (e.key === 't' || e.key === 'T') dom.btnSendTest.click();
-      else if (e.key === '1') dom.btnToggleStep1.click();
-      else if (e.key === '2') dom.btnToggleStep2.click();
-      else if (e.key === '3') dom.btnToggleStep3.click();
+      else if (e.key === '1') dom.btnStepToggle1.click();
+      else if (e.key === '2') dom.btnStepToggle2.click();
+      else if (e.key === '3') dom.btnStepToggle3.click();
       else if (e.key === '0') dom.btnSendOff.click();
       else if (e.key === 'c' || e.key === 'C') dom.btnSendCalib.click();
       else if (e.key === 'i' || e.key === 'I') triggerInrushPeak();
+      else if (e.key === 'p' || e.key === 'P') dom.btnTogglePresentation.click();
     });
   }
 
-  /**
-   * Emula el comando serie 't' en modo simulación (destello de LEDs secuencial).
-   */
   function simulateLedTestSequence() {
     state.stepState = [false, false, false];
     updateUI();
@@ -1640,7 +1785,7 @@
   }
 
   // ==========================================================================
-  // ARRANQUE DE LA APLICACIÓN
+  // ARRANQUE DEL SISTEMA
   // ==========================================================================
   function start() {
     initEventListeners();
@@ -1648,24 +1793,22 @@
     setupPowerTriangle();
 
     logTerminal('==================================================================');
-    logTerminal(' POWERGuard 5 — Dashboard de Telemetría y Compensación de FP');
+    logTerminal(' POWERGuard 5 — SCADA Industrial de Compensación de FP');
     logTerminal(' Instituto Kriete de Ingeniería y Ciencias · Circuitos Eléctricos');
-    logTerminal(' CONDICIÓN REAL DE LABORATORIO:');
-    logTerminal(' • Motor WEG W01 en VACÍO CONTINUO');
-    logTerminal(' • FP máximo sin compensar: 0.18 - 0.20 (Inductivo puro)');
-    logTerminal(' • Picos de arranque transitorios: 10 - 15 A');
-    logTerminal(' • Sensor Hall ACS712-30A (Escala ±30A lineal sin saturación)');
-    logTerminal(' • Banco de capacitores 1:2:4 (15, 30, 60 uF -> 105 uF max)');
+    logTerminal(' • Condición Real: Motor WEG W01 0.5 HP en VACÍO CONTINUO');
+    logTerminal(' • P = 130 W | Q_motor = 600 VAR | FP sin compensar = 0.212');
+    logTerminal(' • Banco 105 µF (570 VAR): Q_neta = 30 VAR -> FP Compensado = 0.974');
+    logTerminal(' • Picos de arranque: 10 A a 15 A medidos por sensor ACS712-30A');
     logTerminal('==================================================================');
-    logTerminal('[INICIO] Sistema listo en Modo Simulación (Vacío continuo).');
-    logTerminal('[INICIO] Conecta el Arduino Nano por USB para adquirir datos reales.');
+    logTerminal('[SCADA] Sistema iniciado en modo simulación local.');
 
-    // Bucle periódico de adquisición/simulación cada 500 ms (coincidente con ventana de 10 ciclos del ATmega328P)
+    addAlarm('INFORMATIVA', 'Sistema SCADA iniciado. Supervisión activa en 120 V / 60 Hz.', 'Banco de capacitores preparado');
+
+    // Bucle periódico cada 500 ms (coincidente con ATmega328P)
     setInterval(() => {
       if (state.mode === 'sim') {
         runSimulationStep();
       } else {
-        // En modo serie, refrescar timers de bloqueo RC cada 500ms
         updateUI();
       }
     }, 500);
@@ -1674,7 +1817,6 @@
     runSimulationStep();
   }
 
-  // Ejecutar cuando el DOM esté listo
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start);
   } else {
@@ -1682,4 +1824,3 @@
   }
 
 })();
-
