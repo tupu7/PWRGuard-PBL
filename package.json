@@ -1,0 +1,21 @@
+{
+  "name": "powerguard-5-dashboard",
+  "version": "5.0.0",
+  "description": "POWERGuard 5 — Sistema Automático de Compensación de Factor de Potencia (Instituto Kriete de Ingeniería y Ciencias)",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx --yes serve -p 8080 .",
+    "serve": "python start_server.py"
+  },
+  "keywords": [
+    "powerguard",
+    "power-factor",
+    "arduino-nano",
+    "web-serial-api",
+    "circuits",
+    "engineering"
+  ],
+  "author": "PowerGuard 5 (Diana Carballo, Emma Palacios, Eduardo Figueroa, Juan Pablo Ramírez)",
+  "license": "MIT"
+}
+
