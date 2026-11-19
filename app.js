@@ -40,7 +40,7 @@
 
     // Transitorio de arranque (pico 10 - 15 A)
     peakCurrentRecorded: 13.8,
-    inrushMultiplier: 1.0,
+    inrushSurgeA: 0,
     inrushDecayTimer: null,
 
     // Estado físico del banco de capacitores [D4 (15uF), D5 (30uF), D6 (60uF)]
@@ -70,7 +70,7 @@
 
     // Lazo automático de histéresis
     lastAutoActionTime: 0,
-    autoActionDelayMs: 4500,
+    autoActionDelayMs: 1000,
 
     // Sistema centralizado de alarmas
     alarms: [],
@@ -102,36 +102,29 @@
   const dom = {
     // Header & Tabs
     tabBtnMonitor: document.getElementById('tabBtnMonitor'),
-    tabBtnEngineering: document.getElementById('tabBtnEngineering'),
     tabBtnHistory: document.getElementById('tabBtnHistory'),
     tabMonitor: document.getElementById('tabMonitor'),
-    tabEngineering: document.getElementById('tabEngineering'),
     tabHistory: document.getElementById('tabHistory'),
 
-    modeBadge: document.getElementById('modeBadge'),
-    modeText: document.getElementById('modeText'),
+    // Selector de Modo Simulación vs Medir Datos Reales
+    btnSelectSim: document.getElementById('btnSelectSim'),
+    btnSelectReal: document.getElementById('btnSelectReal'),
+    dotSim: document.getElementById('dotSim'),
+    labelSim: document.getElementById('labelSim'),
+    labelReal: document.getElementById('labelReal'),
+
     toggleAutoBtn: document.getElementById('toggleAutoBtn'),
     autoIndicatorDot: document.getElementById('autoIndicatorDot'),
     autoBtnText: document.getElementById('autoBtnText'),
-    btnConnectSerial: document.getElementById('btnConnectSerial'),
-    serialBtnLabel: document.getElementById('serialBtnLabel'),
     btnOpenAlarms: document.getElementById('btnOpenAlarms'),
     alarmCountHeaderBadge: document.getElementById('alarmCountHeaderBadge'),
     btnTogglePresentation: document.getElementById('btnTogglePresentation'),
     btnOpenDocs: document.getElementById('btnOpenDocs'),
 
-    // Motor Controls
-    btnLoadEmpty: document.getElementById('btnLoadEmpty'),
-    btnLoadMid: document.getElementById('btnLoadMid'),
-    btnLoadFull: document.getElementById('btnLoadFull'),
-    btnLoadOff: document.getElementById('btnLoadOff'),
-    btnSimInrush: document.getElementById('btnSimInrush'),
-    btnSendTest: document.getElementById('btnSendTest'),
-    btnSendCalib: document.getElementById('btnSendCalib'),
-    btnSendOff: document.getElementById('btnSendOff'),
-
-    // Motor Visual Card
+    // Motor Visual Card & Interruptor ON/OFF
     cardMotorWeg: document.getElementById('cardMotorWeg'),
+    btnToggleMotorPower: document.getElementById('btnToggleMotorPower'),
+    motorPowerDot: document.getElementById('motorPowerDot'),
     motorStatusDot: document.getElementById('motorStatusDot'),
     badgeMotorState: document.getElementById('badgeMotorState'),
     motorRunningIndicator: document.getElementById('motorRunningIndicator'),
@@ -281,9 +274,9 @@
     // 5. Corriente eficaz de línea total: I_rms = S / V_rms
     let iRms = (vRms > 10.0) ? (sApp / vRms) : 0.0;
 
-    // Aplicar transitorio de arranque inrush (10 - 15 A)
-    if (state.inrushMultiplier > 1.0) {
-      iRms *= state.inrushMultiplier;
+    // Aplicar transitorio de arranque inrush (10 - 15 A pico en arranque)
+    if (state.inrushSurgeA && state.inrushSurgeA > 0) {
+      iRms += state.inrushSurgeA;
     }
 
     // Registrar pico máximo (Max-Hold)
@@ -604,37 +597,34 @@
 
   function triggerInrushPeak() {
     if (state.simMotor.p <= 0.1 && state.simMotor.q <= 0.1) {
-      logTerminal('[INRUSH] El motor está apagado. Selecciona un estado de marcha primero.');
+      logTerminal('[INRUSH] El motor está apagado. Enciende el motor primero.');
       return;
     }
 
-    // Pico realista de 11.5 A a 14.8 A
-    const targetPeak = 11.5 + Math.random() * 3.3;
-    const baseI = Math.max(0.5, (state.telemetry.sApp || 133.4) / (state.telemetry.vRms || 120.0));
-    state.inrushMultiplier = targetPeak / baseI;
+    // Pico transitorio realista entre 11.2 A y 14.5 A
+    const targetPeak = 11.2 + Math.random() * 3.0;
+    const currentBase = Math.max(0.5, (state.telemetry.sApp || 133.4) / (state.telemetry.vRms || 120.0));
+    state.inrushSurgeA = Math.max(0, targetPeak - currentBase);
+    state.peakCurrentRecorded = Math.max(state.peakCurrentRecorded, targetPeak);
 
-    if (targetPeak > state.peakCurrentRecorded) {
-      state.peakCurrentRecorded = targetPeak;
-    }
-
-    logTerminal(`[INRUSH] Transitorio de arranque: Pico de corriente ${targetPeak.toFixed(2)} A (Sensado por ACS712-30A sin saturar).`);
-    addAlarm('INFORMATIVA', `Pico transitorio de arranque: ${targetPeak.toFixed(2)} A registrado por el sensor ACS712-30A.`, 'Comportamiento inductivo normal de aceleración');
+    logTerminal(`[INRUSH] Transitorio de arranque: Pico de corriente ${targetPeak.toFixed(2)} A (sensado por ACS712-30A sin saturar).`);
+    addAlarm('INFORMATIVA', `Pico transitorio de arranque: ${targetPeak.toFixed(2)} A registrado por el sensor ACS712-30A.`, 'ACS712-30A operando en rango lineal');
 
     if (state.inrushDecayTimer) clearInterval(state.inrushDecayTimer);
     const startTime = Date.now();
-    const durationMs = 1800;
+    const durationMs = 1500;
 
     state.inrushDecayTimer = setInterval(() => {
       const elapsed = Date.now() - startTime;
       if (elapsed >= durationMs) {
-        state.inrushMultiplier = 1.0;
+        state.inrushSurgeA = 0;
         clearInterval(state.inrushDecayTimer);
         state.inrushDecayTimer = null;
       } else {
         const progress = elapsed / durationMs;
-        state.inrushMultiplier = 1.0 + ((targetPeak / baseI) - 1.0) * Math.exp(-progress * 4.5);
+        state.inrushSurgeA = (targetPeak - currentBase) * Math.exp(-progress * 4.8);
       }
-    }, 50);
+    }, 40);
   }
 
   function resetPeakCurrent() {
@@ -888,26 +878,35 @@
     renderFpGauge(t.isMotorOff ? 0 : t.fp, t.isCapacitive);
 
     // 2. PANEL VISUAL DEL MOTOR WEG W01
-    if (t.isMotorOff) {
+    const isMotorRunning = (state.simMotor.p > 0.1 || state.simMotor.q > 0.1) && !t.isMotorOff;
+    if (!isMotorRunning) {
       dom.cardMotorWeg.classList.remove('motor-running-active');
-      dom.motorStatusDot.className = 'w-2 h-2 rounded-full bg-slate-500';
-      dom.badgeMotorState.textContent = 'APAGADO';
-      dom.badgeMotorState.className = 'px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700';
-      dom.motorRunningIndicator.classList.add('hidden');
-      dom.motorLoadText.textContent = 'En Reposo';
-      dom.motorPText.textContent = '0 W';
+      if (dom.motorStatusDot) dom.motorStatusDot.className = 'w-2 h-2 rounded-full bg-slate-500';
+      if (dom.motorPowerDot) dom.motorPowerDot.className = 'w-2 h-2 rounded-full bg-rose-500';
+      if (dom.badgeMotorState) dom.badgeMotorState.textContent = 'APAGADO';
+      if (dom.btnToggleMotorPower) {
+        dom.btnToggleMotorPower.className = 'px-2.5 py-1 rounded text-xs font-mono font-bold transition flex items-center gap-1.5 bg-rose-500/20 text-rose-400 border border-rose-500/40 hover:bg-rose-500/30 active:scale-95 cursor-pointer';
+      }
+      if (dom.motorRunningIndicator) {
+        dom.motorRunningIndicator.classList.remove('hidden');
+        dom.motorRunningIndicator.innerHTML = '<span class="text-rose-400">⏹</span> <span>0 RPM (PARADO)</span>';
+      }
+      if (dom.motorLoadText) dom.motorLoadText.textContent = 'En Reposo';
+      if (dom.motorPText) dom.motorPText.textContent = '0 W';
     } else {
       dom.cardMotorWeg.classList.add('motor-running-active');
-      dom.motorStatusDot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
-      dom.badgeMotorState.textContent = 'ENCENDIDO';
-      dom.badgeMotorState.className = 'px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
-      dom.motorRunningIndicator.classList.remove('hidden');
-
-      if (state.motorPresetKey === 'empty') dom.motorLoadText.textContent = 'En Vacío (Lab)';
-      else if (state.motorPresetKey === 'mid') dom.motorLoadText.textContent = 'Carga Media';
-      else dom.motorLoadText.textContent = 'Plena Carga';
-
-      dom.motorPText.textContent = `${t.pAct.toFixed(0)} W`;
+      if (dom.motorStatusDot) dom.motorStatusDot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+      if (dom.motorPowerDot) dom.motorPowerDot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+      if (dom.badgeMotorState) dom.badgeMotorState.textContent = 'ENCENDIDO';
+      if (dom.btnToggleMotorPower) {
+        dom.btnToggleMotorPower.className = 'px-2.5 py-1 rounded text-xs font-mono font-bold transition flex items-center gap-1.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30 active:scale-95 cursor-pointer';
+      }
+      if (dom.motorRunningIndicator) {
+        dom.motorRunningIndicator.classList.remove('hidden');
+        dom.motorRunningIndicator.innerHTML = '<span class="inline-block animate-spin text-cyan-400">⚙</span> <span>1735 RPM</span>';
+      }
+      if (dom.motorLoadText) dom.motorLoadText.textContent = 'En Vacío (Lab)';
+      if (dom.motorPText) dom.motorPText.textContent = `${t.pAct.toFixed(0)} W`;
     }
 
     // 3. BANCO DE CAPACITORES 1:2:4
@@ -954,9 +953,7 @@
       : 'text-[11px] font-mono px-1.5 py-0.5 rounded bg-scada-800 text-slate-400 border border-scada-700';
 
     dom.valP.textContent = t.pAct.toFixed(1);
-    if (state.motorPresetKey === 'empty') dom.valPLoadPct.textContent = 'En Vacío (Lab)';
-    else if (state.motorPresetKey === 'mid') dom.valPLoadPct.textContent = '59% Carga';
-    else if (state.motorPresetKey === 'full') dom.valPLoadPct.textContent = '100% Carga';
+    if (isMotorRunning) dom.valPLoadPct.textContent = 'En Vacío (Lab)';
     else dom.valPLoadPct.textContent = 'Reposo 0%';
 
     dom.valQ.textContent = Math.abs(t.qRea).toFixed(1);
@@ -972,12 +969,64 @@
       dom.badgeQState.className = 'text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30';
     }
 
-    // 5. MEMORIA DE CÁLCULO (PESTAÑA INGENIERÍA)
-    updateMathMemo();
+    updateSourceButtonsUI();
+  }
 
-    // 6. TABLA DE VERDAD 1:2:4
-    const stepDec = (state.stepState[0] ? 1 : 0) + (state.stepState[1] ? 2 : 0) + (state.stepState[2] ? 4 : 0);
-    updateTruthTable(stepDec);
+  function updateSourceButtonsUI() {
+    if (state.mode === 'sim') {
+      if (dom.btnSelectSim) {
+        dom.btnSelectSim.className = 'px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm';
+      }
+      if (dom.dotSim) dom.dotSim.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+      if (dom.btnSelectReal) {
+        dom.btnSelectReal.className = 'px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1.5 text-slate-400 hover:text-white hover:bg-scada-800 border border-transparent';
+      }
+      if (dom.labelReal) dom.labelReal.textContent = 'MEDIR DATOS REALES';
+    } else {
+      if (dom.btnSelectSim) {
+        dom.btnSelectSim.className = 'px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1.5 text-slate-400 hover:text-white hover:bg-scada-800 border border-transparent';
+      }
+      if (dom.dotSim) dom.dotSim.className = 'w-2 h-2 rounded-full bg-slate-500';
+      if (dom.btnSelectReal) {
+        dom.btnSelectReal.className = 'px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1.5 bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm';
+      }
+      if (dom.labelReal) dom.labelReal.textContent = 'DATOS REALES (ARDUINO USB)';
+    }
+  }
+
+  function toggleMotorPower() {
+    const isCurrentlyRunning = (state.simMotor.p > 0.1 || state.simMotor.q > 0.1);
+    if (isCurrentlyRunning) {
+      state.simMotor.p = 0;
+      state.simMotor.q = 0;
+      turnOffAllSteps(true);
+      logTerminal('[MOTOR] Motor WEG apagado. Todos los pasos del banco desconectados.');
+      addAlarm('ADVERTENCIA', 'Motor en reposo. Banco de capacitores desconectado.', 'Pulsar ENCENDER para arrancar');
+    } else {
+      state.simMotor.p = 130.0;
+      state.simMotor.q = 600.0;
+      state.simMotor.v = 120.0;
+      logTerminal('[MOTOR] Motor WEG encendido en vacío (130 W / 600 VAR).');
+      addAlarm('INFORMATIVA', 'Motor WEG en marcha. Regulación automática activa.', 'FP meta: 0.974');
+      triggerInrushPeak();
+    }
+    updateUI();
+  }
+
+  function setSourceMode(newMode) {
+    if (newMode === 'sim') {
+      state.mode = 'sim';
+      updateSourceButtonsUI();
+      logTerminal('[MODO] Cambiado a Modo Simulación Local (Carga WEG 130 W / 600 VAR).');
+    } else if (newMode === 'serial') {
+      if (!state.serial.port) {
+        connectSerial();
+      } else {
+        state.mode = 'serial';
+        updateSourceButtonsUI();
+        logTerminal('[MODO] Cambiado a Adquisición en Tiempo Real por Arduino Nano.');
+      }
+    }
   }
 
   // ==========================================================================
@@ -1103,88 +1152,6 @@
   }
 
   // ==========================================================================
-  // MEMORIA DE CÁLCULO EN VIVO & TABLA DE VERDAD
-  // ==========================================================================
-
-  function updateMathMemo() {
-    const t = state.telemetry;
-    dom.mathMemoVrms.textContent = `= √( (1/320) · ${(t.vRms * t.vRms * 320).toFixed(0)} ) = ${t.vRms.toFixed(2)} V`;
-    dom.mathMemoIrms.textContent = `= √( (1/320) · ${(t.iRms * t.iRms * 320).toFixed(1)} ) = ${t.iRms.toFixed(2)} A`;
-    dom.mathMemoP.textContent = `${t.pAct.toFixed(1)} W`;
-    dom.mathMemoS.textContent = `${t.sApp.toFixed(1)} VA`;
-    dom.mathMemoFP.textContent = `${t.fp.toFixed(3)}`;
-
-    dom.mathMemoQ.textContent = `${t.qRea >= 0 ? '+' : ''}${t.qRea.toFixed(1)} VAR (${t.isCapacitive ? 'ADELANTO' : 'ATRASO'})`;
-    dom.mathMemoPhi.textContent = `${t.phiDeg.toFixed(1)}°`;
-    dom.mathMemoDt.textContent = `${t.deltaTMs.toFixed(2)} ms`;
-
-    dom.mathMemoQcReq.textContent = `Q_C = ${t.qcReq.toFixed(1)} VAR (Meta FP=0.97)`;
-    dom.mathMemoCReq.textContent = `${t.cReqUF.toFixed(1)} µF`;
-    dom.mathMemoFPTeo.textContent = `${t.fpTeorico.toFixed(3)}`;
-    dom.mathMemoErrorBadge.textContent = `Error: ${t.errorPct.toFixed(2)}%`;
-  }
-
-  function updateTruthTable(activeStepDec) {
-    if (!dom.truthTableBody) return;
-
-    let html = '';
-    const v = state.telemetry.vRms || 120.0;
-    const p = state.telemetry.pAct || 130.0;
-    const qMotor = (state.mode === 'sim') ? state.simMotor.q : (state.telemetry.qRea + state.telemetry.qInjected);
-
-    for (let i = 0; i < 8; i++) {
-      const b0 = (i & 1) ? 1 : 0;
-      const b1 = (i & 2) ? 1 : 0;
-      const b2 = (i & 4) ? 1 : 0;
-
-      const cTot = (b0 * 15.0) + (b1 * 30.0) + (b2 * 60.0);
-      const qInj = OMEGA * (cTot * 1e-6) * (v * v);
-      const qRes = qMotor - qInj;
-      const sRes = Math.sqrt(p * p + qRes * qRes);
-      let fpEst = (sRes > 0.1) ? (p / sRes) : 1.0;
-      if (fpEst > 1.0) fpEst = 1.0;
-
-      const isActive = (i === activeStepDec);
-      const rowBg = isActive ? 'bg-cyan-950/30 font-bold border-l-2 border-l-cyan-400' : 'hover:bg-scada-900/60';
-      const fpColor = (qRes < -5.0) ? 'text-purple-400' : (fpEst >= 0.950 ? 'text-emerald-400 font-bold' : 'text-slate-400');
-
-      html += `
-        <tr class="${rowBg} transition">
-          <td class="py-2 px-3 flex items-center gap-2">
-            <span class="w-1.5 h-1.5 rounded-full ${isActive ? 'bg-cyan-400 animate-ping' : 'bg-slate-700'}"></span>
-            <span>Paso ${i} [${b0}, ${b1}, ${b2}]</span>
-          </td>
-          <td class="py-2 px-3 text-red-400">${b0 ? '15 µF' : '—'}</td>
-          <td class="py-2 px-3 text-blue-400">${b1 ? '30 µF' : '—'}</td>
-          <td class="py-2 px-3 text-emerald-400">${b2 ? '60 µF' : '—'}</td>
-          <td class="py-2 px-3 font-semibold text-white">${cTot.toFixed(0)} µF</td>
-          <td class="py-2 px-3 text-cyan-400">${qInj.toFixed(1)} VAR</td>
-          <td class="py-2 px-3 ${fpColor}">${fpEst.toFixed(3)} ${fpEst >= 0.95 ? '★' : ''}</td>
-          <td class="py-2 px-3 text-center">
-            ${isActive ? '<span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">ACTIVA</span>' : '<span class="text-slate-600">—</span>'}
-          </td>
-          <td class="py-2 px-3 text-right">
-            <button onclick="window.selectCombination(${i})" class="px-2 py-0.5 rounded bg-scada-850 hover:bg-scada-800 text-slate-300 border border-scada-700 text-[10px] transition disabled:opacity-30 disabled:cursor-not-allowed" ${state.isAutoControl ? 'disabled' : ''}>
-              Activar
-            </button>
-          </td>
-        </tr>
-      `;
-    }
-    dom.truthTableBody.innerHTML = html;
-  }
-
-  window.selectCombination = function(code) {
-    if (state.isAutoControl) {
-      alert('Desactiva el Control Automático primero para seleccionar pasos manualmente.');
-      return;
-    }
-    setStep(0, Boolean(code & 1));
-    setStep(1, Boolean(code & 2));
-    setStep(2, Boolean(code & 4));
-  };
-
-  // ==========================================================================
   // OSCILOSCOPIO DIGITAL DE 2 CANALES (CANVAS 60 FPS)
   // ==========================================================================
   function setupOscilloscope() {
@@ -1289,156 +1256,6 @@
       dom.hudIpp.textContent = `${(iPeak * 2).toFixed(1)} Ap-p (${iRms.toFixed(2)} Arms) ${isSurge ? '⚡ [INRUSH]' : ''}`;
       dom.hudDt.textContent = `${deltaTMs.toFixed(2)} ms`;
       dom.hudPhi.textContent = `${phiDeg.toFixed(1)}° ${isCapacitive ? '(Adelanto)' : '(Atraso)'}`;
-    }
-
-    requestAnimationFrame(render);
-  }
-
-  // ==========================================================================
-  // TRIÁNGULO DE POTENCIAS (PLANO COMPLEJO FASORIAL)
-  // ==========================================================================
-  function setupPowerTriangle() {
-    const canvas = dom.triangleCanvas;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-
-    function resize() {
-      const rect = canvas.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      ctx.scale(dpr, dpr);
-    }
-    window.addEventListener('resize', resize);
-    resize();
-
-    function render() {
-      requestAnimationFrame(render);
-
-      const rect = canvas.getBoundingClientRect();
-      const w = rect.width;
-      const h = rect.height;
-
-      ctx.fillStyle = '#05070a';
-      ctx.fillRect(0, 0, w, h);
-
-      const originX = w * 0.16;
-      const originY = h * 0.65;
-
-      const pVal = state.telemetry.pAct || 130.0;
-      const qVal = state.telemetry.qRea || 30.0;
-      const qMotor = (state.mode === 'sim') ? state.simMotor.q : (state.telemetry.qRea + state.telemetry.qInjected);
-      const qInjected = state.telemetry.qInjected || 0.0;
-
-      const maxVal = 1000.0;
-      const scaleX = (w * 0.68) / maxVal;
-      const scaleY = (h * 0.52) / maxVal;
-
-      const pPx = pVal * scaleX;
-      const qMotorPx = qMotor * scaleY;
-      const qNetPx = qVal * scaleY;
-      const qInjPx = qInjected * scaleY;
-
-      // Ejes P y Q
-      ctx.strokeStyle = '#1a2230';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(originX - 15, originY); ctx.lineTo(w - 20, originY);
-      ctx.moveTo(originX, 15); ctx.lineTo(originX, h - 15);
-      ctx.stroke();
-
-      ctx.fillStyle = '#64748b';
-      ctx.font = '9px JetBrains Mono';
-      ctx.fillText('+P (W)', w - 45, originY - 6);
-      ctx.fillText('+Q (Ind)', originX + 6, 25);
-      ctx.fillText('-Q (Cap)', originX + 6, h - 18);
-
-      if (state.telemetry.isMotorOff) {
-        ctx.fillStyle = '#71717a';
-        ctx.font = '11px JetBrains Mono';
-        ctx.textAlign = 'center';
-        ctx.fillText('MOTOR APAGADO — VECTORES EN REPOSO', w / 2, h / 2);
-        return;
-      }
-
-      // 1. Vector Potencia Activa P (Verde esmeralda horizontal)
-      ctx.strokeStyle = '#22c55e';
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.moveTo(originX, originY);
-      ctx.lineTo(originX + pPx, originY);
-      ctx.stroke();
-
-      ctx.fillStyle = '#4ade80';
-      ctx.fillText(`P = ${pVal.toFixed(0)} W`, originX + (pPx / 2) - 20, originY + 14);
-
-      // 2. Vector Q_motor original (Línea punteada naranja)
-      ctx.strokeStyle = '#f59e0b';
-      ctx.setLineDash([3, 3]);
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(originX + pPx, originY);
-      ctx.lineTo(originX + pPx, originY - qMotorPx);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      ctx.fillStyle = '#fbbf24';
-      ctx.fillText(`Q_mot = ${qMotor.toFixed(0)} VAR`, originX + pPx + 6, originY - (qMotorPx / 2));
-
-      // 3. Vector Q_C inyectado por capacitores (Flecha azul hacia abajo)
-      if (qInjPx > 4) {
-        ctx.strokeStyle = '#38bdf8';
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.moveTo(originX + pPx + 10, originY - qMotorPx);
-        ctx.lineTo(originX + pPx + 10, originY - qMotorPx + qInjPx);
-        ctx.stroke();
-
-        ctx.fillStyle = '#38bdf8';
-        ctx.fillText(`-Q_C = ${qInjected.toFixed(0)} VAR`, originX + pPx + 15, originY - qMotorPx + (qInjPx / 2));
-      }
-
-      // 4. Vector Q_neta resultante
-      ctx.strokeStyle = state.telemetry.isCapacitive ? '#c084fc' : '#eab308';
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.moveTo(originX + pPx, originY);
-      ctx.lineTo(originX + pPx, originY - qNetPx);
-      ctx.stroke();
-
-      // 5. Fasor S_1 sin compensar (Gris tenue punteado)
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
-      ctx.setLineDash([2, 2]);
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(originX, originY);
-      ctx.lineTo(originX + pPx, originY - qMotorPx);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // 6. Fasor S_2 compensado actual (Cian sólido brillante)
-      ctx.strokeStyle = '#22d3ee';
-      ctx.lineWidth = 2.2;
-      ctx.beginPath();
-      ctx.moveTo(originX, originY);
-      ctx.lineTo(originX + pPx, originY - qNetPx);
-      ctx.stroke();
-
-      // Arco del ángulo phi resultante
-      const phiRad = state.telemetry.phiDeg * (Math.PI / 180.0);
-      ctx.strokeStyle = '#22d3ee';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.arc(originX, originY, 28, 0, -phiRad, true);
-      ctx.stroke();
-
-      ctx.fillStyle = '#22d3ee';
-      ctx.fillText(`φ = ${state.telemetry.phiDeg.toFixed(1)}°`, originX + 34, originY - 6);
-
-      // Textos inferiores
-      const s1 = Math.sqrt(pVal * pVal + qMotor * qMotor);
-      dom.triS1.textContent = `${s1.toFixed(0)} VA (FP ${(pVal / s1).toFixed(3)})`;
-      dom.triS2.textContent = `${state.telemetry.sApp.toFixed(0)} VA (FP ${state.telemetry.fp.toFixed(3)})`;
     }
 
     requestAnimationFrame(render);
@@ -1560,12 +1377,12 @@
   // ==========================================================================
 
   function initEventListeners() {
-    // 1. Navegación por pestañas
+    // 1. Navegación por pestañas (Monitor SCADA e Historial & Terminal)
     function switchTab(targetId) {
-      [dom.tabMonitor, dom.tabEngineering, dom.tabHistory].forEach(t => {
+      [dom.tabMonitor, dom.tabHistory].forEach(t => {
         if (t) t.classList.remove('active');
       });
-      [dom.tabBtnMonitor, dom.tabBtnEngineering, dom.tabBtnHistory].forEach(b => {
+      [dom.tabBtnMonitor, dom.tabBtnHistory].forEach(b => {
         if (b) {
           b.classList.remove('bg-scada-800', 'border-scada-600', 'text-white', 'shadow-sm');
           b.classList.add('text-slate-400');
@@ -1575,20 +1392,24 @@
       const activeTab = document.getElementById(targetId);
       if (activeTab) activeTab.classList.add('active');
 
-      if (targetId === 'tabMonitor') {
+      if (targetId === 'tabMonitor' && dom.tabBtnMonitor) {
         dom.tabBtnMonitor.classList.add('bg-scada-800', 'border-scada-600', 'text-white', 'shadow-sm');
-      } else if (targetId === 'tabEngineering') {
-        dom.tabBtnEngineering.classList.add('bg-scada-800', 'border-scada-600', 'text-white', 'shadow-sm');
-      } else if (targetId === 'tabHistory') {
+      } else if (targetId === 'tabHistory' && dom.tabBtnHistory) {
         dom.tabBtnHistory.classList.add('bg-scada-800', 'border-scada-600', 'text-white', 'shadow-sm');
       }
     }
 
     if (dom.tabBtnMonitor) dom.tabBtnMonitor.addEventListener('click', () => switchTab('tabMonitor'));
-    if (dom.tabBtnEngineering) dom.tabBtnEngineering.addEventListener('click', () => switchTab('tabEngineering'));
     if (dom.tabBtnHistory) dom.tabBtnHistory.addEventListener('click', () => switchTab('tabHistory'));
 
-    // 2. Control Automático / Manual
+    // 2. Selector de Modo: Simulación vs Medir Datos Reales (USB)
+    if (dom.btnSelectSim) dom.btnSelectSim.addEventListener('click', () => setSourceMode('sim'));
+    if (dom.btnSelectReal) dom.btnSelectReal.addEventListener('click', () => setSourceMode('serial'));
+
+    // 3. Interruptor ON/OFF del Motor WEG
+    if (dom.btnToggleMotorPower) dom.btnToggleMotorPower.addEventListener('click', toggleMotorPower);
+
+    // 4. Control Automático / Manual
     if (dom.toggleAutoBtn) {
       dom.toggleAutoBtn.addEventListener('click', () => {
         state.isAutoControl = !state.isAutoControl;
@@ -1607,10 +1428,7 @@
       });
     }
 
-    // 3. Conexión Web Serial
-    if (dom.btnConnectSerial) dom.btnConnectSerial.addEventListener('click', connectSerial);
-
-    // 4. Modo Presentación (Zen Mode)
+    // 5. Modo Presentación (Zen Mode)
     if (dom.btnTogglePresentation) {
       dom.btnTogglePresentation.addEventListener('click', () => {
         state.presentationMode = !state.presentationMode;
@@ -1624,65 +1442,13 @@
       });
     }
 
-    // 5. Presets del Motor WEG
-    function setMotorPreset(key) {
-      const prevKey = state.motorPresetKey;
-      state.motorPresetKey = key;
-      state.simMotor = { ...MOTOR_PRESETS[key] };
-
-      [dom.btnLoadEmpty, dom.btnLoadMid, dom.btnLoadFull, dom.btnLoadOff].forEach(b => {
-        if (!b) return;
-        b.classList.remove('bg-emerald-950/60', 'text-emerald-300', 'border-emerald-500/40', 'bg-scada-800', 'text-white', 'bg-rose-950/40', 'text-rose-300');
-        b.classList.add('text-slate-400');
-      });
-
-      if (key === 'empty') {
-        dom.btnLoadEmpty.classList.add('bg-emerald-950/60', 'text-emerald-300', 'border-emerald-500/40');
-      } else if (key === 'mid') {
-        dom.btnLoadMid.classList.add('bg-scada-800', 'text-white');
-      } else if (key === 'full') {
-        dom.btnLoadFull.classList.add('bg-scada-800', 'text-white');
-      } else if (key === 'off') {
-        dom.btnLoadOff.classList.add('bg-rose-950/40', 'text-rose-300');
-      }
-
-      logTerminal(`[MOTOR] Seleccionado: ${MOTOR_PRESETS[key].label}`);
-      addAlarm('INFORMATIVA', `Estado de motor modificado: ${MOTOR_PRESETS[key].label}`, 'Supervisar reactiva');
-
-      // Si se enciende desde OFF, disparar inrush
-      if (prevKey === 'off' && key !== 'off') triggerInrushPeak();
-    }
-
-    if (dom.btnLoadEmpty) dom.btnLoadEmpty.addEventListener('click', () => setMotorPreset('empty'));
-    if (dom.btnLoadMid) dom.btnLoadMid.addEventListener('click', () => setMotorPreset('mid'));
-    if (dom.btnLoadFull) dom.btnLoadFull.addEventListener('click', () => setMotorPreset('full'));
-    if (dom.btnLoadOff) dom.btnLoadOff.addEventListener('click', () => setMotorPreset('off'));
-
-    // Botón Inrush
-    if (dom.btnSimInrush) dom.btnSimInrush.addEventListener('click', triggerInrushPeak);
-
-    // Reset Peak
-    if (dom.btnResetPeak) dom.btnResetPeak.addEventListener('click', resetPeakCurrent);
-
-    // Acciones rápidas
-    if (dom.btnSendTest) dom.btnSendTest.addEventListener('click', () => {
-      logTerminal('[COMANDO] Ejecutando test secuencial de LEDs...');
-      sendSerialCommand('t');
-      if (state.mode === 'sim') simulateLedTestSequence();
-    });
-
-    if (dom.btnSendCalib) dom.btnSendCalib.addEventListener('click', () => {
-      logTerminal('[COMANDO] Calibrando referencias virtuales VB (2.5 V)...');
-      sendSerialCommand('c');
-      addAlarm('INFORMATIVA', 'Calibración de tierra virtual VB ejecutada.', 'Offsets en reposo');
-    });
-
-    if (dom.btnSendOff) dom.btnSendOff.addEventListener('click', () => turnOffAllSteps(true));
-
     // Conmutadores individuales del Banco 1:2:4
     if (dom.btnStepToggle1) dom.btnStepToggle1.addEventListener('click', () => setStep(0, !state.stepState[0]));
     if (dom.btnStepToggle2) dom.btnStepToggle2.addEventListener('click', () => setStep(1, !state.stepState[1]));
     if (dom.btnStepToggle3) dom.btnStepToggle3.addEventListener('click', () => setStep(2, !state.stepState[2]));
+
+    // Reset Peak
+    if (dom.btnResetPeak) dom.btnResetPeak.addEventListener('click', resetPeakCurrent);
 
     // Pausa osciloscopio
     if (dom.btnPauseScope) {
@@ -1763,14 +1529,13 @@
     // Atajos de teclado para laboratorio
     window.addEventListener('keydown', (e) => {
       if (document.activeElement === dom.termInput) return;
-      if (e.key === 't' || e.key === 'T') dom.btnSendTest.click();
-      else if (e.key === '1') dom.btnStepToggle1.click();
-      else if (e.key === '2') dom.btnStepToggle2.click();
-      else if (e.key === '3') dom.btnStepToggle3.click();
-      else if (e.key === '0') dom.btnSendOff.click();
-      else if (e.key === 'c' || e.key === 'C') dom.btnSendCalib.click();
+      if (e.key === '1') setStep(0, !state.stepState[0]);
+      else if (e.key === '2') setStep(1, !state.stepState[1]);
+      else if (e.key === '3') setStep(2, !state.stepState[2]);
+      else if (e.key === '0') turnOffAllSteps(true);
       else if (e.key === 'i' || e.key === 'I') triggerInrushPeak();
-      else if (e.key === 'p' || e.key === 'P') dom.btnTogglePresentation.click();
+      else if (e.key === 'm' || e.key === 'M') toggleMotorPower();
+      else if (e.key === 'p' || e.key === 'P') { if (dom.btnTogglePresentation) dom.btnTogglePresentation.click(); }
     });
   }
 
@@ -1790,7 +1555,6 @@
   function start() {
     initEventListeners();
     setupOscilloscope();
-    setupPowerTriangle();
 
     logTerminal('==================================================================');
     logTerminal(' POWERGuard 5 — SCADA Industrial de Compensación de FP');
