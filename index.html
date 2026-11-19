@@ -151,6 +151,41 @@
        ======================================================================== -->
   <main id="tabMonitor" class="tab-content active max-w-7xl mx-auto px-4 sm:px-6 py-4 space-y-4 flex-1 w-full">
 
+    <!-- BANNER DE ADVERTENCIA SCADA: MODO DATOS REALES (HARDWARE EN ESPERA / DESCONECTADO) -->
+    <div id="hardwareWarningBanner" class="hidden scada-card p-3.5 border-l-4 border-l-amber-500 bg-amber-950/20 border-amber-500/30 text-amber-200 shadow-md transition-all duration-300">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div class="flex items-start md:items-center gap-3">
+          <div class="w-9 h-9 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0 text-amber-400">
+            <svg class="w-5 h-5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-xs font-bold text-amber-400 font-mono uppercase tracking-wider">⚠️ ADVERTENCIA: MODO DATOS REALES ACTIVO</span>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-semibold">MEDICIONES EN 0.0</span>
+              <span class="text-[10px] font-mono text-slate-400">Sin comunicación con Arduino Nano</span>
+            </div>
+            <p class="text-xs text-slate-300 mt-1 leading-relaxed">
+              No se detecta dispositivo serial USB conectado (115200 baudios). Todos los sensores físicos (<span class="text-amber-300 font-mono">A0 Tensión</span> y <span class="text-amber-300 font-mono">A1 Corriente ACS712</span>) se muestran en <strong>cero</strong> hasta recibir tramas reales de hardware.
+            </p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0 self-end md:self-center font-mono">
+          <button id="btnRetrySerial" class="px-3 py-1.5 rounded-md bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span>Reintentar Conexión USB</span>
+          </button>
+          <button id="btnFallbackSim" class="px-3 py-1.5 rounded-md bg-scada-850 hover:bg-scada-800 text-slate-300 hover:text-white border border-scada-700 text-xs font-medium transition flex items-center gap-1.5 cursor-pointer">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            <span>Volver a Simulación</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- ====================================================================
          BENTO GRID INDUSTRIAL SCADA (2-COLUMN ARCHITECTURE)
          Left: FP Protagonist + Capacitor Bank 1:2:4

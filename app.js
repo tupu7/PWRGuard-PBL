@@ -59,6 +59,9 @@
       phiDeg: 13.0,
       deltaTMs: 0.60,
       isCapacitive: false,
+      isMotorOff: false,
+      isHardwareDisconnected: false,
+      hardwareReason: '',
       qcReq: 0.0,
       cReqUF: 0.0,
       qInjected: 570.0,
@@ -87,7 +90,8 @@
       writer: null,
       keepReading: false,
       textDecoder: null,
-      buffer: ''
+      buffer: '',
+      lastFrameTime: 0
     },
 
     // Osciloscopio
@@ -112,6 +116,9 @@
     dotSim: document.getElementById('dotSim'),
     labelSim: document.getElementById('labelSim'),
     labelReal: document.getElementById('labelReal'),
+    hardwareWarningBanner: document.getElementById('hardwareWarningBanner'),
+    btnRetrySerial: document.getElementById('btnRetrySerial'),
+    btnFallbackSim: document.getElementById('btnFallbackSim'),
 
     toggleAutoBtn: document.getElementById('toggleAutoBtn'),
     autoIndicatorDot: document.getElementById('autoIndicatorDot'),
@@ -411,10 +418,11 @@
   function runAutoControlLoop() {
     if (!state.isAutoControl) return;
 
+    const { pAct, qRea, fp, isCapacitive, isMotorOff, isHardwareDisconnected, vRms } = state.telemetry;
+    if (isHardwareDisconnected) return;
+
     const now = Date.now();
     if (now - state.lastAutoActionTime < state.autoActionDelayMs) return;
-
-    const { pAct, qRea, fp, isCapacitive, isMotorOff, vRms } = state.telemetry;
 
     // Si el motor está en reposo, desconectar capacitores para evitar sobretensión
     if (isMotorOff || pAct < 10.0) {
@@ -510,6 +518,7 @@
 
   function checkSupervisoryAlarms() {
     const t = state.telemetry;
+    if (t.isHardwareDisconnected) return;
 
     // Alarma de Sobrecorriente fuera de arranque
     if (t.iRms > 12.0 && state.inrushMultiplier <= 1.05) {
@@ -659,51 +668,92 @@
   // WEB SERIAL API (ARDUINO NANO ATMEGA328P A 115200 BAUD)
   // ==========================================================================
 
+  function zeroOutTelemetry(reason = 'ESPERANDO HARDWARE USB') {
+    state.telemetry = {
+      vRms: 0.0,
+      iRms: 0.0,
+      pAct: 0.0,
+      qRea: 0.0,
+      sApp: 0.0,
+      fp: 0.0,
+      phiDeg: 0.0,
+      deltaTMs: 0.0,
+      isCapacitive: false,
+      isMotorOff: true,
+      isHardwareDisconnected: true,
+      hardwareReason: reason,
+      qcReq: 0.0,
+      cReqUF: 0.0,
+      qInjected: 0.0,
+      cTotalUF: 0.0,
+      iReductionPct: 0.0,
+      fpTeorico: 0.0,
+      errorPct: 0.0
+    };
+    state.stepState = [false, false, false];
+    state.peakCurrentRecorded = 0.0;
+  }
+
   async function connectSerial() {
     if (!('serial' in navigator)) {
       alert('La Web Serial API no está soportada en este navegador.\nUsa Google Chrome, Microsoft Edge o Brave.');
       return;
     }
 
+    // Poner el sistema en modo serial con valores en CERO mientras se selecciona el puerto
+    state.mode = 'serial';
+    if (!state.serial.port) {
+      zeroOutTelemetry('ESPERANDO PUERTO USB');
+      if (dom.hardwareWarningBanner) dom.hardwareWarningBanner.classList.remove('hidden');
+      updateSourceButtonsUI();
+      updateUI();
+    }
+
     try {
       if (state.serial.port) {
-        await disconnectSerial();
+        await disconnectSerial(false);
         return;
       }
 
-      logTerminal('[SERIAL] Solicitando selección de puerto serie USB...');
+      logTerminal('[SERIAL] Solicitando selección de puerto serie USB (Arduino Nano)...');
       const port = await navigator.serial.requestPort();
       await port.open({ baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none' });
 
       state.serial.port = port;
       state.mode = 'serial';
       state.serial.keepReading = true;
+      state.serial.lastFrameTime = Date.now();
+      state.telemetry.isHardwareDisconnected = false;
 
-      dom.serialBtnLabel.textContent = 'Desconectar';
-      dom.btnConnectSerial.classList.replace('bg-blue-600', 'bg-emerald-600');
-      dom.modeBadge.classList.replace('text-emerald-400', 'text-cyan-400');
-      dom.modeBadge.classList.replace('border-emerald-500/30', 'border-cyan-500/30');
-      dom.modeBadge.classList.replace('bg-emerald-500/10', 'bg-cyan-500/10');
-      dom.modeText.textContent = 'ARDUINO NANO';
+      // Ocultar banner de advertencia tras conexión exitosa
+      if (dom.hardwareWarningBanner) dom.hardwareWarningBanner.classList.add('hidden');
 
-      logTerminal('[SERIAL] Conectado a 115200 baudios.');
-      logTerminal('[SERIAL] Enviando comando \'j\' para activar telemetría JSON...');
-      addAlarm('INFORMATIVA', 'Arduino Nano conectado por USB. Adquisición por hardware activa.', 'Monitorear flujo JSON');
+      logTerminal('[SERIAL] Conectado exitosamente a Arduino Nano a 115200 baudios.');
+      logTerminal('[SERIAL] Enviando comando \'j\' para activar telemetría JSON de sensores A0 y A1...');
+      addAlarm('INFORMATIVA', 'Arduino Nano conectado por USB. Adquisición por hardware activa.', 'Monitoreando entradas físicas A0 y A1');
 
       const encoder = new TextEncoderStream();
       encoder.readable.pipeTo(port.writable);
       state.serial.writer = encoder.writable.getWriter();
       await state.serial.writer.write('j\n');
 
+      updateSourceButtonsUI();
       readSerialLoop(port);
 
     } catch (err) {
-      logTerminal(`[ERROR SERIAL] Fallo al conectar: ${err.message}`);
-      await disconnectSerial();
+      logTerminal(`[SERIAL] No se conectó hardware: ${err.message}`);
+      // MANTENER en modo serial, mediciones fijadas en cero estricto y advertencia visible
+      state.serial.port = null;
+      state.serial.keepReading = false;
+      zeroOutTelemetry('ESPERANDO HARDWARE USB');
+      if (dom.hardwareWarningBanner) dom.hardwareWarningBanner.classList.remove('hidden');
+      updateSourceButtonsUI();
+      updateUI();
+      addAlarm('ADVERTENCIA', 'Modo Datos Reales activo sin Arduino conectado. Mediciones en cero (0.0).', 'Conectar Arduino Nano por USB a 115200 baud');
     }
   }
 
-  async function disconnectSerial() {
+  async function disconnectSerial(fallbackToSim = false) {
     state.serial.keepReading = false;
     try {
       if (state.serial.reader) { await state.serial.reader.cancel(); state.serial.reader = null; }
@@ -712,16 +762,23 @@
     } catch (e) {
       console.warn('Cierre de puerto:', e);
     }
+    state.serial.port = null;
 
-    state.mode = 'sim';
-    dom.serialBtnLabel.textContent = 'Conectar USB';
-    dom.btnConnectSerial.classList.replace('bg-emerald-600', 'bg-blue-600');
-    dom.modeBadge.classList.replace('text-cyan-400', 'text-emerald-400');
-    dom.modeBadge.classList.replace('border-cyan-500/30', 'border-emerald-500/30');
-    dom.modeBadge.classList.replace('bg-cyan-500/10', 'bg-emerald-500/10');
-    dom.modeText.textContent = 'SIMULACIÓN';
-    logTerminal('[SERIAL] Desconectado. Regresando a modo simulación local.');
-    addAlarm('INFORMATIVA', 'Arduino Nano desconectado. Sistema en modo simulación.', 'Reconectar cuando sea necesario');
+    if (fallbackToSim) {
+      state.mode = 'sim';
+      state.telemetry.isHardwareDisconnected = false;
+      if (dom.hardwareWarningBanner) dom.hardwareWarningBanner.classList.add('hidden');
+      logTerminal('[SERIAL] Desconectado. Regresando a modo simulación local (Carga WEG 130 W / 600 VAR).');
+      addAlarm('INFORMATIVA', 'Sistema en modo simulación local.', 'Carga en vacío 130 W / 600 VAR');
+      runSimulationStep();
+    } else {
+      zeroOutTelemetry('DISPOSITIVO DESCONECTADO');
+      if (dom.hardwareWarningBanner) dom.hardwareWarningBanner.classList.remove('hidden');
+      logTerminal('[SERIAL] Puerto cerrado. Modo datos reales sin hardware activo (lecturas en cero).');
+      addAlarm('ADVERTENCIA', 'Arduino desconectado. Todas las mediciones en cero.', 'Reconectar por USB');
+      updateUI();
+    }
+    updateSourceButtonsUI();
   }
 
   async function readSerialLoop(port) {
@@ -764,6 +821,10 @@
     if (line.startsWith('{') && line.endsWith('}')) {
       try {
         const data = JSON.parse(line);
+        state.telemetry.isHardwareDisconnected = false;
+        state.serial.lastFrameTime = Date.now();
+        if (dom.hardwareWarningBanner) dom.hardwareWarningBanner.classList.add('hidden');
+
         state.telemetry.vRms = data.v || 0.0;
         state.telemetry.iRms = data.i || 0.0;
         state.telemetry.pAct = data.p || 0.0;
@@ -834,11 +895,20 @@
     const t = state.telemetry;
 
     // 1. MEDIDOR PROTAGONISTA DE FACTOR DE POTENCIA
-    dom.valFP.textContent = t.isMotorOff ? '0.000' : t.fp.toFixed(3);
-    dom.valPhiDeg.textContent = t.isMotorOff ? '0.0' : t.phiDeg.toFixed(1);
-    dom.valDeltaT.textContent = t.isMotorOff ? '0.00 ms' : `${t.deltaTMs.toFixed(2)} ms`;
-
-    if (t.isMotorOff) {
+    if (t.isHardwareDisconnected) {
+      dom.valFP.textContent = '0.000';
+      dom.valPhiDeg.textContent = '0.0';
+      dom.valDeltaT.textContent = '0.00 ms';
+      dom.fpStatusBadge.textContent = '⚠️ ' + (t.hardwareReason || 'ESPERANDO USB');
+      dom.fpStatusBadge.className = 'px-2.5 py-0.5 rounded text-[11px] font-mono font-bold badge-critico';
+      dom.valFpRegime.textContent = 'Sin Señal de Sensores';
+      dom.valFpRegime.className = 'text-amber-400 font-bold';
+      dom.fpConditionSummary.textContent = 'Conectar Arduino por USB (115200 baud)';
+      dom.fpConditionSummary.className = 'text-amber-300 font-medium';
+    } else if (t.isMotorOff) {
+      dom.valFP.textContent = '0.000';
+      dom.valPhiDeg.textContent = '0.0';
+      dom.valDeltaT.textContent = '0.00 ms';
       dom.fpStatusBadge.textContent = 'MOTOR APAGADO';
       dom.fpStatusBadge.className = 'px-2.5 py-0.5 rounded text-[11px] font-mono font-bold badge-neutral';
       dom.valFpRegime.textContent = 'Sin Carga Activa';
@@ -846,6 +916,9 @@
       dom.fpConditionSummary.textContent = 'En Reposo Seguro';
       dom.fpConditionSummary.className = 'text-slate-400 font-medium';
     } else if (t.isCapacitive) {
+      dom.valFP.textContent = t.fp.toFixed(3);
+      dom.valPhiDeg.textContent = t.phiDeg.toFixed(1);
+      dom.valDeltaT.textContent = `${t.deltaTMs.toFixed(2)} ms`;
       dom.fpStatusBadge.textContent = 'SOBRECOMPENSADO · ADELANTO';
       dom.fpStatusBadge.className = 'px-2.5 py-0.5 rounded text-[11px] font-mono font-bold badge-sobrecompensado';
       dom.valFpRegime.textContent = 'ADELANTO (Capacitivo)';
@@ -853,6 +926,9 @@
       dom.fpConditionSummary.textContent = 'Riesgo de Resonancia';
       dom.fpConditionSummary.className = 'text-purple-400 font-medium';
     } else if (t.fp >= 0.950 && t.fp <= 0.990) {
+      dom.valFP.textContent = t.fp.toFixed(3);
+      dom.valPhiDeg.textContent = t.phiDeg.toFixed(1);
+      dom.valDeltaT.textContent = `${t.deltaTMs.toFixed(2)} ms`;
       dom.fpStatusBadge.textContent = 'ÓPTIMO EN RANGO';
       dom.fpStatusBadge.className = 'px-2.5 py-0.5 rounded text-[11px] font-mono font-bold badge-optimo';
       dom.valFpRegime.textContent = 'ATRASO (Inductivo)';
@@ -860,6 +936,9 @@
       dom.fpConditionSummary.textContent = 'Cumple Norma CFE (0.95–0.99)';
       dom.fpConditionSummary.className = 'text-emerald-400 font-medium';
     } else if (t.fp > 0.990) {
+      dom.valFP.textContent = t.fp.toFixed(3);
+      dom.valPhiDeg.textContent = t.phiDeg.toFixed(1);
+      dom.valDeltaT.textContent = `${t.deltaTMs.toFixed(2)} ms`;
       dom.fpStatusBadge.textContent = 'UNITARIO / AL LÍMITE';
       dom.fpStatusBadge.className = 'px-2.5 py-0.5 rounded text-[11px] font-mono font-bold badge-optimo';
       dom.valFpRegime.textContent = 'ATRASO Mínimo';
@@ -867,6 +946,9 @@
       dom.fpConditionSummary.textContent = 'Excelente Compensación';
       dom.fpConditionSummary.className = 'text-emerald-400 font-medium';
     } else {
+      dom.valFP.textContent = t.fp.toFixed(3);
+      dom.valPhiDeg.textContent = t.phiDeg.toFixed(1);
+      dom.valDeltaT.textContent = `${t.deltaTMs.toFixed(2)} ms`;
       dom.fpStatusBadge.textContent = 'SUBCOMPENSADO · ATRASO';
       dom.fpStatusBadge.className = 'px-2.5 py-0.5 rounded text-[11px] font-mono font-bold badge-critico';
       dom.valFpRegime.textContent = 'ATRASO (Inductivo Puro)';
@@ -875,15 +957,35 @@
       dom.fpConditionSummary.className = 'text-amber-400 font-medium';
     }
 
-    renderFpGauge(t.isMotorOff ? 0 : t.fp, t.isCapacitive);
+    renderFpGauge((t.isMotorOff || t.isHardwareDisconnected) ? 0 : t.fp, t.isCapacitive);
 
     // 2. PANEL VISUAL DEL MOTOR WEG W01
-    const isMotorRunning = (state.simMotor.p > 0.1 || state.simMotor.q > 0.1) && !t.isMotorOff;
-    if (!isMotorRunning) {
+    const isMotorRunning = (state.simMotor.p > 0.1 || state.simMotor.q > 0.1) && !t.isMotorOff && !t.isHardwareDisconnected;
+    if (t.isHardwareDisconnected) {
+      dom.cardMotorWeg.classList.remove('motor-running-active');
+      if (dom.motorStatusDot) dom.motorStatusDot.className = 'w-2 h-2 rounded-full bg-amber-500 animate-pulse';
+      if (dom.motorPowerDot) dom.motorPowerDot.className = 'w-2 h-2 rounded-full bg-slate-600';
+      if (dom.badgeMotorState) {
+        dom.badgeMotorState.textContent = 'SIN HARDWARE';
+        dom.badgeMotorState.className = 'text-[11px] font-mono px-2 py-0.5 rounded font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30';
+      }
+      if (dom.btnToggleMotorPower) {
+        dom.btnToggleMotorPower.className = 'px-2.5 py-1 rounded text-xs font-mono font-bold transition flex items-center gap-1.5 bg-scada-800 text-slate-500 border border-scada-700 cursor-not-allowed';
+      }
+      if (dom.motorRunningIndicator) {
+        dom.motorRunningIndicator.classList.remove('hidden');
+        dom.motorRunningIndicator.innerHTML = '<span class="text-amber-400">⚠️</span> <span>ESPERANDO SEÑAL A0/A1</span>';
+      }
+      if (dom.motorLoadText) dom.motorLoadText.textContent = 'Sin Medición';
+      if (dom.motorPText) dom.motorPText.textContent = '0 W';
+    } else if (!isMotorRunning) {
       dom.cardMotorWeg.classList.remove('motor-running-active');
       if (dom.motorStatusDot) dom.motorStatusDot.className = 'w-2 h-2 rounded-full bg-slate-500';
       if (dom.motorPowerDot) dom.motorPowerDot.className = 'w-2 h-2 rounded-full bg-rose-500';
-      if (dom.badgeMotorState) dom.badgeMotorState.textContent = 'APAGADO';
+      if (dom.badgeMotorState) {
+        dom.badgeMotorState.textContent = 'APAGADO';
+        dom.badgeMotorState.className = 'text-[11px] font-mono px-2 py-0.5 rounded font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20';
+      }
       if (dom.btnToggleMotorPower) {
         dom.btnToggleMotorPower.className = 'px-2.5 py-1 rounded text-xs font-mono font-bold transition flex items-center gap-1.5 bg-rose-500/20 text-rose-400 border border-rose-500/40 hover:bg-rose-500/30 active:scale-95 cursor-pointer';
       }
@@ -897,7 +999,10 @@
       dom.cardMotorWeg.classList.add('motor-running-active');
       if (dom.motorStatusDot) dom.motorStatusDot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
       if (dom.motorPowerDot) dom.motorPowerDot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
-      if (dom.badgeMotorState) dom.badgeMotorState.textContent = 'ENCENDIDO';
+      if (dom.badgeMotorState) {
+        dom.badgeMotorState.textContent = 'ENCENDIDO';
+        dom.badgeMotorState.className = 'text-[11px] font-mono px-2 py-0.5 rounded font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+      }
       if (dom.btnToggleMotorPower) {
         dom.btnToggleMotorPower.className = 'px-2.5 py-1 rounded text-xs font-mono font-bold transition flex items-center gap-1.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30 active:scale-95 cursor-pointer';
       }
@@ -931,42 +1036,66 @@
     dom.btnStepToggle3.disabled = state.isAutoControl || isStepLocked(2);
 
     // Bloqueo de Descarga RC
-    let maxLockRem = Math.max(getLockRemainingSec(0), getLockRemainingSec(1), getLockRemainingSec(2));
-    if (maxLockRem > 0) {
-      dom.lockStatusSummary.textContent = `DESCARGANDO ${maxLockRem.toFixed(1)} s`;
-      dom.lockStatusSummary.className = 'text-amber-400 font-semibold';
-      const pct = (maxLockRem / (LOCK_TIME_MS / 1000.0)) * 100;
-      dom.lockBarFill.style.width = `${pct}%`;
-    } else {
-      dom.lockStatusSummary.textContent = 'DISPONIBLE (0.0 V)';
-      dom.lockStatusSummary.className = 'text-emerald-400 font-semibold';
+    if (t.isHardwareDisconnected) {
+      dom.lockStatusSummary.textContent = 'EN ESPERA (0.0 V)';
+      dom.lockStatusSummary.className = 'text-slate-400 font-semibold';
       dom.lockBarFill.style.width = '0%';
+    } else {
+      let maxLockRem = Math.max(getLockRemainingSec(0), getLockRemainingSec(1), getLockRemainingSec(2));
+      if (maxLockRem > 0) {
+        dom.lockStatusSummary.textContent = `DESCARGANDO ${maxLockRem.toFixed(1)} s`;
+        dom.lockStatusSummary.className = 'text-amber-400 font-semibold';
+        const pct = (maxLockRem / (LOCK_TIME_MS / 1000.0)) * 100;
+        dom.lockBarFill.style.width = `${pct}%`;
+      } else {
+        dom.lockStatusSummary.textContent = 'DISPONIBLE (0.0 V)';
+        dom.lockStatusSummary.className = 'text-emerald-400 font-semibold';
+        dom.lockBarFill.style.width = '0%';
+      }
     }
 
     // 4. 4 TARJETAS KPI
-    dom.valVrms.textContent = t.vRms.toFixed(1);
-    dom.valIrms.textContent = t.iRms.toFixed(2);
-    dom.valIPeak.textContent = `${state.peakCurrentRecorded.toFixed(1)} A`;
-    dom.valIReduction.textContent = `-${t.iReductionPct.toFixed(1)}%`;
-    dom.valIReduction.className = (t.iReductionPct > 5)
-      ? 'text-[11px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-      : 'text-[11px] font-mono px-1.5 py-0.5 rounded bg-scada-800 text-slate-400 border border-scada-700';
+    if (t.isHardwareDisconnected) {
+      dom.valVrms.textContent = '0.0';
+      dom.valIrms.textContent = '0.00';
+      dom.valIPeak.textContent = '0.0 A';
+      dom.valIReduction.textContent = '0.0%';
+      dom.valIReduction.className = 'text-[11px] font-mono px-1.5 py-0.5 rounded bg-scada-800 text-slate-400 border border-scada-700';
 
-    dom.valP.textContent = t.pAct.toFixed(1);
-    if (isMotorRunning) dom.valPLoadPct.textContent = 'En Vacío (Lab)';
-    else dom.valPLoadPct.textContent = 'Reposo 0%';
+      dom.valP.textContent = '0.0';
+      dom.valPLoadPct.textContent = 'Sin Señal (0 W)';
 
-    dom.valQ.textContent = Math.abs(t.qRea).toFixed(1);
-    const qMotorBase = (state.mode === 'sim') ? state.simMotor.q : (t.qRea + t.qInjected);
-    dom.valQMotorText.textContent = qMotorBase.toFixed(0);
-    dom.valQInjectedText.textContent = `-${t.qInjected.toFixed(0)}`;
+      dom.valQ.textContent = '0.0';
+      dom.valQMotorText.textContent = '0';
+      dom.valQInjectedText.textContent = '0';
 
-    if (t.isCapacitive) {
-      dom.badgeQState.textContent = 'ADELANTO';
-      dom.badgeQState.className = 'text-[10px] font-mono px-1.5 py-0.2 rounded bg-purple-500/15 text-purple-400 border border-purple-500/30';
+      dom.badgeQState.textContent = 'NEUTRO';
+      dom.badgeQState.className = 'text-[10px] font-mono px-1.5 py-0.2 rounded bg-scada-800 text-slate-400 border border-scada-700';
     } else {
-      dom.badgeQState.textContent = 'ATRASO';
-      dom.badgeQState.className = 'text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30';
+      dom.valVrms.textContent = t.vRms.toFixed(1);
+      dom.valIrms.textContent = t.iRms.toFixed(2);
+      dom.valIPeak.textContent = `${state.peakCurrentRecorded.toFixed(1)} A`;
+      dom.valIReduction.textContent = `-${t.iReductionPct.toFixed(1)}%`;
+      dom.valIReduction.className = (t.iReductionPct > 5)
+        ? 'text-[11px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+        : 'text-[11px] font-mono px-1.5 py-0.5 rounded bg-scada-800 text-slate-400 border border-scada-700';
+
+      dom.valP.textContent = t.pAct.toFixed(1);
+      if (isMotorRunning) dom.valPLoadPct.textContent = 'En Vacío (Lab)';
+      else dom.valPLoadPct.textContent = 'Reposo 0%';
+
+      dom.valQ.textContent = Math.abs(t.qRea).toFixed(1);
+      const qMotorBase = (state.mode === 'sim') ? state.simMotor.q : (t.qRea + t.qInjected);
+      dom.valQMotorText.textContent = qMotorBase.toFixed(0);
+      dom.valQInjectedText.textContent = `-${t.qInjected.toFixed(0)}`;
+
+      if (t.isCapacitive) {
+        dom.badgeQState.textContent = 'ADELANTO';
+        dom.badgeQState.className = 'text-[10px] font-mono px-1.5 py-0.2 rounded bg-purple-500/15 text-purple-400 border border-purple-500/30';
+      } else {
+        dom.badgeQState.textContent = 'ATRASO';
+        dom.badgeQState.className = 'text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30';
+      }
     }
 
     updateSourceButtonsUI();
@@ -975,26 +1104,36 @@
   function updateSourceButtonsUI() {
     if (state.mode === 'sim') {
       if (dom.btnSelectSim) {
-        dom.btnSelectSim.className = 'px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm';
+        dom.btnSelectSim.className = 'px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm cursor-pointer';
       }
       if (dom.dotSim) dom.dotSim.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
       if (dom.btnSelectReal) {
-        dom.btnSelectReal.className = 'px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1.5 text-slate-400 hover:text-white hover:bg-scada-800 border border-transparent';
+        dom.btnSelectReal.className = 'px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1.5 text-slate-400 hover:text-white hover:bg-scada-800 border border-transparent cursor-pointer';
       }
       if (dom.labelReal) dom.labelReal.textContent = 'MEDIR DATOS REALES';
     } else {
       if (dom.btnSelectSim) {
-        dom.btnSelectSim.className = 'px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1.5 text-slate-400 hover:text-white hover:bg-scada-800 border border-transparent';
+        dom.btnSelectSim.className = 'px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1.5 text-slate-400 hover:text-white hover:bg-scada-800 border border-transparent cursor-pointer';
       }
-      if (dom.dotSim) dom.dotSim.className = 'w-2 h-2 rounded-full bg-slate-500';
+      if (dom.dotSim) dom.dotSim.className = 'w-2 h-2 rounded-full bg-slate-600';
       if (dom.btnSelectReal) {
-        dom.btnSelectReal.className = 'px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1.5 bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm';
+        if (state.serial.port) {
+          dom.btnSelectReal.className = 'px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm cursor-pointer';
+          if (dom.labelReal) dom.labelReal.textContent = 'ARDUINO CONECTADO (115200)';
+        } else {
+          dom.btnSelectReal.className = 'px-2.5 py-1 rounded-md font-semibold transition flex items-center gap-1.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm cursor-pointer';
+          if (dom.labelReal) dom.labelReal.textContent = '⚠️ ESPERANDO USB (0.0)';
+        }
       }
-      if (dom.labelReal) dom.labelReal.textContent = 'DATOS REALES (ARDUINO USB)';
     }
   }
 
   function toggleMotorPower() {
+    if (state.mode === 'serial') {
+      logTerminal('[MOTOR] En Modo Datos Reales, el motor WEG se energiza directamente desde la alimentación eléctrica del laboratorio.');
+      addAlarm('INFORMATIVA', 'Modo Hardware: El motor debe encenderse físicamente en el banco de pruebas.', 'Verificar alimentación de 120V CA');
+      return;
+    }
     const isCurrentlyRunning = (state.simMotor.p > 0.1 || state.simMotor.q > 0.1);
     if (isCurrentlyRunning) {
       state.simMotor.p = 0;
@@ -1015,16 +1154,31 @@
 
   function setSourceMode(newMode) {
     if (newMode === 'sim') {
-      state.mode = 'sim';
-      updateSourceButtonsUI();
-      logTerminal('[MODO] Cambiado a Modo Simulación Local (Carga WEG 130 W / 600 VAR).');
+      if (state.serial.port) {
+        disconnectSerial(true);
+      } else {
+        state.mode = 'sim';
+        state.telemetry.isHardwareDisconnected = false;
+        if (dom.hardwareWarningBanner) dom.hardwareWarningBanner.classList.add('hidden');
+        updateSourceButtonsUI();
+        logTerminal('[MODO] Cambiado a Modo Simulación Local (Carga WEG 130 W / 600 VAR).');
+        addAlarm('INFORMATIVA', 'Modo Simulación activo.', 'Carga en vacío 130 W / 600 VAR');
+        runSimulationStep();
+      }
     } else if (newMode === 'serial') {
+      state.mode = 'serial';
       if (!state.serial.port) {
+        zeroOutTelemetry('ESPERANDO HARDWARE USB');
+        if (dom.hardwareWarningBanner) dom.hardwareWarningBanner.classList.remove('hidden');
+        updateSourceButtonsUI();
+        updateUI();
+        logTerminal('[MODO] Modo Datos Reales seleccionado. Esperando conexión serial con Arduino Nano...');
         connectSerial();
       } else {
-        state.mode = 'serial';
+        state.telemetry.isHardwareDisconnected = false;
+        if (dom.hardwareWarningBanner) dom.hardwareWarningBanner.classList.add('hidden');
         updateSourceButtonsUI();
-        logTerminal('[MODO] Cambiado a Adquisición en Tiempo Real por Arduino Nano.');
+        logTerminal('[MODO] Adquisición en Tiempo Real por Arduino Nano activa.');
       }
     }
   }
@@ -1209,10 +1363,10 @@
       ctx.moveTo(midX, 0); ctx.lineTo(midX, h);
       ctx.stroke();
 
-      const { vRms, iRms, phiDeg, deltaTMs, isMotorOff, isCapacitive } = state.telemetry;
-      const vPeak = isMotorOff ? 0 : Math.SQRT2 * vRms;
-      const iPeak = isMotorOff ? 0 : Math.SQRT2 * iRms;
-      const phiRad = isMotorOff ? 0 : phiDeg * (Math.PI / 180.0) * (isCapacitive ? -1 : 1);
+      const { vRms, iRms, phiDeg, deltaTMs, isMotorOff, isCapacitive, isHardwareDisconnected } = state.telemetry;
+      const vPeak = (isMotorOff || isHardwareDisconnected) ? 0 : Math.SQRT2 * vRms;
+      const iPeak = (isMotorOff || isHardwareDisconnected) ? 0 : Math.SQRT2 * iRms;
+      const phiRad = (isMotorOff || isHardwareDisconnected) ? 0 : phiDeg * (Math.PI / 180.0) * (isCapacitive ? -1 : 1);
 
       // Escalas de visualización
       const vPixelsPerVolt = (h / 2) / 200.0;
@@ -1251,11 +1405,18 @@
       ctx.stroke();
 
       // HUD Metrics
-      dom.hudVpp.textContent = `${(vPeak * 2).toFixed(1)} Vp-p`;
-      const isSurge = (iRms >= 9.5);
-      dom.hudIpp.textContent = `${(iPeak * 2).toFixed(1)} Ap-p (${iRms.toFixed(2)} Arms) ${isSurge ? '⚡ [INRUSH]' : ''}`;
-      dom.hudDt.textContent = `${deltaTMs.toFixed(2)} ms`;
-      dom.hudPhi.textContent = `${phiDeg.toFixed(1)}° ${isCapacitive ? '(Adelanto)' : '(Atraso)'}`;
+      if (isHardwareDisconnected) {
+        dom.hudVpp.textContent = '0.0 Vp-p';
+        dom.hudIpp.textContent = '0.00 Ap-p (0.00 Arms) ⚠️ [SIN HARDWARE]';
+        dom.hudDt.textContent = '0.00 ms';
+        dom.hudPhi.textContent = '0.0° (Sin Señal)';
+      } else {
+        dom.hudVpp.textContent = `${(vPeak * 2).toFixed(1)} Vp-p`;
+        const isSurge = (iRms >= 9.5);
+        dom.hudIpp.textContent = `${(iPeak * 2).toFixed(1)} Ap-p (${iRms.toFixed(2)} Arms) ${isSurge ? '⚡ [INRUSH]' : ''}`;
+        dom.hudDt.textContent = `${deltaTMs.toFixed(2)} ms`;
+        dom.hudPhi.textContent = `${phiDeg.toFixed(1)}° ${isCapacitive ? '(Adelanto)' : '(Atraso)'}`;
+      }
     }
 
     requestAnimationFrame(render);
@@ -1405,6 +1566,16 @@
     // 2. Selector de Modo: Simulación vs Medir Datos Reales (USB)
     if (dom.btnSelectSim) dom.btnSelectSim.addEventListener('click', () => setSourceMode('sim'));
     if (dom.btnSelectReal) dom.btnSelectReal.addEventListener('click', () => setSourceMode('serial'));
+    if (dom.btnRetrySerial) dom.btnRetrySerial.addEventListener('click', () => connectSerial());
+    if (dom.btnFallbackSim) dom.btnFallbackSim.addEventListener('click', () => setSourceMode('sim'));
+
+    // Detección de desconexión física de cable USB
+    if ('serial' in navigator) {
+      navigator.serial.addEventListener('disconnect', () => {
+        logTerminal('[SERIAL] Dispositivo USB desconectado físicamente del equipo.');
+        disconnectSerial(false);
+      });
+    }
 
     // 3. Interruptor ON/OFF del Motor WEG
     if (dom.btnToggleMotorPower) dom.btnToggleMotorPower.addEventListener('click', toggleMotorPower);
@@ -1573,7 +1744,22 @@
       if (state.mode === 'sim') {
         runSimulationStep();
       } else {
-        updateUI();
+        // En modo serial (datos reales)
+        if (!state.serial.port) {
+          // No hay hardware conectado: mantener mediciones estrictamente en 0.0
+          zeroOutTelemetry('ESPERANDO HARDWARE USB');
+          updateUI();
+        } else {
+          // Si está conectado, monitorear si han dejado de llegar tramas por más de 3 segundos
+          const elapsed = Date.now() - (state.serial.lastFrameTime || 0);
+          if (state.serial.lastFrameTime > 0 && elapsed > 3000) {
+            zeroOutTelemetry('TIMEOUT SEÑAL ARDUINO');
+            if (dom.hardwareWarningBanner) dom.hardwareWarningBanner.classList.remove('hidden');
+            updateUI();
+          } else {
+            updateUI();
+          }
+        }
       }
     }, 500);
 
